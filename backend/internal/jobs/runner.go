@@ -533,12 +533,24 @@ func (r *runner) uploadChunkOnce(ctx context.Context, chunk *db.Chunk, chunkURL 
 // --- Helpers ---
 
 func (r *runner) ncURL(path string) string {
-	base := strings.TrimRight(r.job.NextcloudURL, "/")
-	return base + "/" + r.job.ID + "_" + path
+	return NextcloudObjectURL(r.job.NextcloudURL, r.job.ID, path)
 }
 
 func (r *runner) ncChunkURL(idx int) string {
-	return r.ncURL(fmt.Sprintf("part_%04d.bin", idx))
+	return ChunkURL(r.job.NextcloudURL, r.job.ID, idx)
+}
+
+// NextcloudObjectURL returns the URL for an object owned by jobID under the
+// given Nextcloud share base. Files are stored flat (no subdirectory) with
+// the job ID prefixed onto the filename.
+func NextcloudObjectURL(ncBase, jobID, name string) string {
+	base := strings.TrimRight(ncBase, "/")
+	return base + "/" + jobID + "_" + name
+}
+
+// ChunkURL returns the Nextcloud URL of a specific chunk part.
+func ChunkURL(ncBase, jobID string, idx int) string {
+	return NextcloudObjectURL(ncBase, jobID, fmt.Sprintf("part_%04d.bin", idx))
 }
 
 func numChunks(fileSize, chunkSize int64) int {

@@ -339,11 +339,6 @@ func jobToResponse(j *db.Job, chunks []db.Chunk) jobResponse {
 	var total, done int
 	var current *chunkInfo
 
-	ncBase := j.NextcloudURL
-	if len(ncBase) > 0 && ncBase[len(ncBase)-1] != '/' {
-		ncBase += "/"
-	}
-
 	for i := range chunks {
 		total++
 		if chunks[i].Status == db.ChunkAcked {
@@ -353,7 +348,7 @@ func jobToResponse(j *db.Job, chunks []db.Chunk) jobResponse {
 			(chunks[i].Status == db.ChunkUploaded || chunks[i].Status == db.ChunkUploading) {
 			current = &chunkInfo{
 				Idx:    chunks[i].Idx,
-				URL:    ncBase + j.ID + "/" + fmt.Sprintf("part_%04d.bin", chunks[i].Idx),
+				URL:    jobs.ChunkURL(j.NextcloudURL, j.ID, chunks[i].Idx),
 				Size:   chunks[i].Size,
 				SHA256: chunks[i].SHA256,
 			}
