@@ -4,7 +4,6 @@
 
 const state = {
   jobs: {},        // id → job object (latest from SSE)
-  view: 'jobs',
   sseStatus: 'connecting',
   sseAbort: null,
 };
@@ -27,7 +26,7 @@ function saveSettings() {
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
   toast('Settings saved.');
-  showView('jobs');
+  closeModal(null, 'settings');
   reconnectSSE();
 }
 
@@ -112,7 +111,7 @@ async function runSSE() {
 
 function onJobUpdate(job) {
   state.jobs[job.id] = job;
-  if (state.view === 'jobs') renderJobsView();
+  renderJobsView();
 }
 
 function setSSEStatus(status, retries) {
@@ -123,22 +122,25 @@ function setSSEStatus(status, retries) {
   dot.title = `SSE: ${status}${retryStr}`;
 }
 
-// ── Views ─────────────────────────────────────────────────────────────────────
+// ── Modals ────────────────────────────────────────────────────────────────────
 
-function showView(name) {
-  state.view = name;
-  document.querySelectorAll('.view').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('nav button').forEach(el => el.classList.remove('active'));
-  document.getElementById(`view-${name}`).classList.add('active');
-  document.getElementById(`nav-${name}`).classList.add('active');
-
-  if (name === 'jobs') renderJobsView();
+function openModal(name) {
+  document.getElementById(`modal-${name}`).classList.add('open');
   if (name === 'submit') {
     const s = getSettings();
     document.getElementById('hint-backend').textContent = s.backendURL || '(not set)';
   }
-  if (name === 'settings') loadSettingsForm();
+  if (name === 'settings') {
+    loadSettingsForm();
+  }
 }
+
+function closeModal(event, name) {
+  if (event) event.stopPropagation();
+  document.getElementById(`modal-${name}`).classList.remove('open');
+}
+
+// ── Views ─────────────────────────────────────────────────────────────────────
 
 function renderJobsView() {
   const container = document.getElementById('jobs-list');
@@ -148,7 +150,7 @@ function renderJobsView() {
 
   if (jobs.length === 0) {
     const msg = state.sseStatus === 'connected'
-      ? '<p>No jobs yet. <a href="#" onclick="showView(\'submit\');return false">Submit one?</a></p>'
+      ? '<p>No jobs yet. Click the + button to submit one.</p>'
       : '<p>Connecting…</p>';
     container.innerHTML = `<div class="empty-state">${msg}</div>`;
     return;
@@ -292,7 +294,7 @@ async function submitJob() {
     // Clear form
     ['f-url', 'f-filename', 'f-referer', 'f-ua'].forEach(id => document.getElementById(id).value = '');
     toast('Job submitted.');
-    showView('jobs');
+    closeModal(null, 'submit');
   } catch (e) {
     toast(`Error: ${e.message}`, true);
   }
@@ -433,11 +435,12 @@ function toast(msg, isError = false) {
 
 function init() {
   const s = getSettings();
+  renderJobsView(); // Start by rendering jobs view unconditionally
+  
   if (!s.backendURL || !s.apiKey) {
-    showView('settings');
+    openModal('settings');
     toast('Configure your backend URL and API key to get started.');
   } else {
-    showView('jobs');
     startSSE();
   }
 

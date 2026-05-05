@@ -1,131 +1,159 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>all-zeroes</title>
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#111827">
+<meta name="theme-color" content="#ffffff" id="meta-theme-color">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:      #111827;
-  --surface: #1f2937;
-  --card:    #374151;
-  --border:  #4b5563;
-  --text:    #f9fafb;
-  --muted:   #9ca3af;
-  --primary: #6366f1;
-  --primary-hover: #4f46e5;
-  --success: #22c55e;
-  --warn:    #f59e0b;
-  --error:   #ef4444;
-  --radius:  8px;
+  --bg: #ffffff;
+  --surface: #fafafa;
+  --card: #ffffff;
+  --border: #eaeaea;
+  --text: #000000;
+  --muted: #666666;
+  --primary: #000000;
+  --primary-hover: #333333;
+  --primary-text: #ffffff;
+  --radius: 6px;
+  --header-height: 64px;
+}
+
+[data-theme="dark"] {
+  --bg: #000000;
+  --surface: #0a0a0a;
+  --card: #000000;
+  --border: #333333;
+  --text: #ffffff;
+  --muted: #888888;
+  --primary: #ffffff;
+  --primary-hover: #cccccc;
+  --primary-text: #000000;
 }
 
 body {
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: 'Poppins', sans-serif;
   font-size: 14px;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  line-height: 1.6;
+  transition: background-color 0.2s, color 0.2s;
 }
 
 /* ── Header ── */
 header {
-  background: var(--surface);
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
-  padding: 0 16px;
+  padding: 0 24px;
   display: flex;
   align-items: center;
-  gap: 24px;
-  height: 52px;
+  gap: 32px;
+  height: var(--header-height);
   flex-shrink: 0;
   position: sticky;
   top: 0;
   z-index: 10;
+  transition: background-color 0.2s, border-color 0.2s;
 }
 header h1 {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--primary);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--text);
   white-space: nowrap;
 }
-nav { display: flex; gap: 4px; flex: 1; }
-nav button {
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-btn {
   background: none;
   border: none;
-  color: var(--muted);
-  padding: 6px 12px;
-  border-radius: var(--radius);
+  color: var(--text);
   cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  transition: background 0.1s, color 0.1s;
+  font-size: 18px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius);
+  transition: background 0.2s;
 }
-nav button:hover { background: var(--card); color: var(--text); }
-nav button.active { background: var(--primary); color: white; }
+.icon-btn:hover { background: var(--surface); }
+
 #sse-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--muted); flex-shrink: 0;
-  transition: background 0.3s;
+  width: 10px; height: 10px; border-radius: 50%;
+  border: 2px solid var(--muted); flex-shrink: 0;
+  transition: border-color 0.3s, background-color 0.3s;
+  margin-left: 8px;
 }
-#sse-dot.connected { background: var(--success); }
-#sse-dot.disconnected { background: var(--error); }
+#sse-dot.connected { border-color: var(--text); background-color: var(--text); }
+#sse-dot.disconnected { border-color: var(--text); background-color: transparent; }
 
 /* ── Main layout ── */
 main {
   flex: 1;
-  max-width: 760px;
+  max-width: 840px;
   width: 100%;
   margin: 0 auto;
-  padding: 20px 16px;
+  padding: 48px 24px 100px 24px; /* padding-bottom to clear FAB */
 }
-
-/* ── Views ── */
-.view { display: none; }
-.view.active { display: block; }
 
 /* ── Toast ── */
 #toast {
   position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%) translateY(80px);
-  background: var(--card);
-  border: 1px solid var(--border);
+  bottom: 24px;
+  left: 24px; /* Move to left so it doesn't overlap FAB */
+  background: var(--text);
+  color: var(--bg);
   border-radius: var(--radius);
-  padding: 10px 18px;
-  font-size: 13px;
-  color: var(--text);
-  transition: transform 0.2s;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  transform: translateY(100px);
+  opacity: 0;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s;
   z-index: 100;
   pointer-events: none;
 }
-#toast.show { transform: translateX(-50%) translateY(0); }
-#toast.error { border-color: var(--error); color: var(--error); }
+#toast.show { transform: translateY(0); opacity: 1; }
+#toast.error { background: var(--bg); color: var(--text); border: 1px solid var(--text); }
 
 /* ── Job cards ── */
 .job-card {
-  background: var(--surface);
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px 16px;
-  margin-bottom: 12px;
+  padding: 24px;
+  margin-bottom: 16px;
+  transition: border-color 0.2s;
 }
-.job-card.status-done { opacity: 0.75; }
+.job-card:hover { border-color: var(--muted); }
+.job-card.status-done { opacity: 0.6; }
+.job-card.status-done:hover { opacity: 1; }
+
 .job-header {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 6px;
+  gap: 16px;
+  margin-bottom: 8px;
 }
 .job-filename {
   font-weight: 600;
+  font-size: 16px;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -133,217 +161,318 @@ main {
 }
 .badge {
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 2px 8px;
-  border-radius: 20px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  border-radius: 999px;
   white-space: nowrap;
   flex-shrink: 0;
+  border: 1px solid var(--border);
+  text-transform: uppercase;
 }
-.badge.queued    { background: var(--card); color: var(--muted); }
-.badge.acquiring { background: #1e3a5f; color: #60a5fa; }
-.badge.staged    { background: #2d2010; color: var(--warn); }
-.badge.delivering { background: #1e1b4b; color: #a5b4fc; }
-.badge.done      { background: #14532d; color: var(--success); }
-.badge.failed    { background: #450a0a; color: var(--error); }
-.badge.canceled  { background: var(--card); color: var(--muted); }
+.badge.done { border-color: var(--text); color: var(--text); }
+.badge.failed { border-style: dashed; border-color: var(--text); }
+.badge.acquiring, .badge.staged, .badge.delivering { background: var(--surface); }
 
-.job-meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+.job-meta { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
 
 /* Progress bar */
 .progress-bar {
-  height: 4px;
-  background: var(--card);
+  height: 2px;
+  background: var(--border);
   border-radius: 2px;
-  margin-bottom: 10px;
+  margin-bottom: 16px;
   overflow: hidden;
 }
 .progress-fill {
   height: 100%;
-  background: var(--primary);
-  border-radius: 2px;
-  transition: width 0.4s;
+  background: var(--text);
+  transition: width 0.4s ease;
 }
 
 /* Chunk action area */
 .chunk-action {
-  background: var(--card);
+  background: var(--surface);
   border-radius: var(--radius);
-  padding: 12px;
+  padding: 16px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
+  border: 1px solid var(--border);
 }
-.chunk-label { flex: 1; font-size: 13px; color: var(--muted); min-width: 120px; }
+.chunk-label { flex: 1; font-size: 13px; color: var(--text); min-width: 120px; }
 
 /* SHA-256 verification row */
 .chunk-sha {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 8px 10px;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 12px 16px;
   flex-wrap: wrap;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
 }
 .sha-label {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
   flex-shrink: 0;
 }
 .sha-value {
   font-family: 'SF Mono', 'Fira Code', monospace;
-  font-size: 11px;
-  color: #a5f3fc;
+  font-size: 12px;
+  color: var(--text);
   word-break: break-all;
   flex: 1;
 }
 
 /* Concat command */
 .concat-box {
-  margin-top: 10px;
-  background: var(--card);
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 12px;
 }
-.concat-box p { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.concat-box p { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
 .concat-cmd {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 12px;
 }
 .concat-cmd code {
   flex: 1;
   font-family: 'SF Mono', 'Fira Code', monospace;
-  font-size: 12px;
-  color: #a5f3fc;
+  font-size: 13px;
+  color: var(--text);
   background: var(--surface);
-  padding: 8px 10px;
-  border-radius: 4px;
+  padding: 12px 16px;
+  border-radius: var(--radius);
   white-space: pre-wrap;
   word-break: break-all;
+  border: 1px solid var(--border);
 }
 
 /* Error message */
-.job-error { color: var(--error); font-size: 13px; margin-top: 6px; }
+.job-error { font-size: 13px; margin-top: 8px; font-family: monospace; border-left: 2px solid var(--text); padding-left: 8px; }
 
 /* Empty state */
 .empty-state {
   text-align: center;
-  padding: 60px 20px;
+  padding: 80px 20px;
   color: var(--muted);
 }
-.empty-state p { margin-bottom: 12px; }
+.empty-state p { margin-bottom: 16px; font-size: 15px; }
+
+/* ── FAB ── */
+.fab {
+  position: fixed;
+  bottom: 32px;
+  right: 32px;
+  width: 64px;
+  height: 64px;
+  border-radius: 32px;
+  background: var(--text);
+  color: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.2s, background 0.2s;
+  z-index: 50;
+}
+.fab:hover { transform: scale(1.05); }
+
+/* ── Modals ── */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+.modal-overlay.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.modal-content {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 500px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 32px;
+  transform: translateY(20px);
+  transition: transform 0.2s;
+  position: relative;
+}
+.modal-overlay.open .modal-content {
+  transform: translateY(0);
+}
+.modal-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.modal-close:hover { color: var(--text); }
+
 
 /* ── Forms ── */
-.form-section { margin-bottom: 24px; }
-.form-section h2 { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+.form-section { margin-bottom: 32px; max-width: 600px; }
+.form-section h2 { font-size: 20px; font-weight: 600; margin-bottom: 24px; letter-spacing: -0.02em; }
 
 label {
   display: block;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  color: var(--muted);
-  margin-bottom: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  color: var(--text);
+  margin-bottom: 8px;
 }
 input[type=text], input[type=url], input[type=password], select {
   width: 100%;
-  background: var(--surface);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text);
-  padding: 8px 12px;
+  padding: 12px 16px;
   font-size: 14px;
+  font-family: inherit;
   outline: none;
-  margin-bottom: 14px;
-  transition: border-color 0.15s;
+  margin-bottom: 20px;
+  transition: border-color 0.2s;
 }
-input:focus, select:focus { border-color: var(--primary); }
-select option { background: var(--surface); }
+input:focus, select:focus { border-color: var(--text); }
+select option { background: var(--bg); color: var(--text); }
 
 .toggle-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 24px;
 }
-.toggle-row label { margin: 0; text-transform: none; font-size: 14px; color: var(--text); }
+.toggle-row label { margin: 0; font-size: 14px; color: var(--text); font-weight: 400; }
+.toggle-row input[type="checkbox"] {
+  accent-color: var(--text);
+  width: 16px;
+  height: 16px;
+}
 
 /* ── Buttons ── */
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 18px;
   border-radius: var(--radius);
-  border: none;
+  border: 1px solid var(--primary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
-  transition: opacity 0.1s, background 0.1s;
+  font-family: inherit;
+  transition: all 0.2s;
   white-space: nowrap;
   text-decoration: none;
-  color: white;
+  background: var(--primary);
+  color: var(--primary-text);
 }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-primary { background: var(--primary); }
-.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
-.btn-success { background: #15803d; }
-.btn-success:hover:not(:disabled) { background: #166534; }
-.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary:hover:not(:disabled) { background: var(--primary-hover); border-color: var(--primary-hover); }
+
+.btn-sm { padding: 6px 12px; font-size: 13px; }
 .btn-ghost {
-  background: var(--card);
-  color: var(--muted);
+  background: transparent;
+  color: var(--text);
   border: 1px solid var(--border);
 }
-.btn-ghost:hover:not(:disabled) { color: var(--text); }
+.btn-ghost:hover:not(:disabled) { border-color: var(--text); background: var(--surface); color: var(--text); }
 
-.hint { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+/* Success action buttons */
+.btn-success {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
+.hint { font-size: 13px; color: var(--muted); margin-bottom: 24px; }
 </style>
 </head>
 <body>
 
 <header>
   <h1>all-zeroes</h1>
-  <nav>
-    <button id="nav-jobs"     onclick="showView('jobs')">Jobs</button>
-    <button id="nav-submit"   onclick="showView('submit')">Submit</button>
-    <button id="nav-settings" onclick="showView('settings')">Settings</button>
-  </nav>
-  <div id="sse-dot" title="SSE connection status"></div>
+  <div style="flex: 1;"></div>
+  <div class="header-actions">
+    <button class="icon-btn" onclick="openModal('settings')" title="Settings">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    </button>
+    <button class="icon-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+      <svg id="theme-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+      </svg>
+    </button>
+    <div id="sse-dot" title="SSE connection status"></div>
+  </div>
 </header>
 
 <main>
-  <!-- Jobs view -->
-  <div id="view-jobs" class="view">
-    <div id="jobs-list">
-      <div class="empty-state"><p>Connecting…</p></div>
-    </div>
+  <div id="jobs-list">
+    <div class="empty-state"><p>Connecting…</p></div>
   </div>
+</main>
 
-  <!-- Submit view -->
-  <div id="view-submit" class="view">
-    <div class="form-section">
-      <h2>New download job</h2>
+<button class="fab" onclick="openModal('submit')" title="New Job">
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <line x1="12" y1="5" x2="12" y2="19"></line>
+    <line x1="5" y1="12" x2="19" y2="12"></line>
+  </svg>
+</button>
+
+<!-- Submit Modal -->
+<div id="modal-submit" class="modal-overlay" onclick="closeModal(event, 'submit')">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="closeModal(null, 'submit')">✕</button>
+    <div class="form-section" style="margin-bottom: 0; max-width: none;">
+      <h2>New Download Job</h2>
       <label for="f-url">URL *</label>
       <input id="f-url" type="url" placeholder="https://example.com/file.zip" autocomplete="off">
 
-      <label for="f-filename">Filename override</label>
-      <input id="f-filename" type="text" placeholder="leave blank to auto-detect">
+      <label for="f-filename">Filename Override</label>
+      <input id="f-filename" type="text" placeholder="Leave blank to auto-detect">
 
       <label for="f-referer">Referer</label>
       <input id="f-referer" type="url" placeholder="https://example.com/">
 
       <label for="f-ua">User-Agent</label>
-      <input id="f-ua" type="text" placeholder="leave blank to use default">
+      <input id="f-ua" type="text" placeholder="Leave blank to use default">
 
       <label for="f-stage">Stage</label>
       <select id="f-stage">
@@ -357,41 +486,76 @@ select option { background: var(--surface); }
         <label for="f-deliver-now">Deliver now (start chunking immediately after download)</label>
       </div>
 
-      <p class="hint">Will use settings: Backend <span id="hint-backend">—</span></p>
-      <button class="btn btn-primary" onclick="submitJob()">Submit job</button>
+      <p class="hint">Using backend: <span id="hint-backend">—</span></p>
+      <button class="btn btn-primary" style="width: 100%" onclick="submitJob()">Submit Job</button>
     </div>
   </div>
+</div>
 
-  <!-- Settings view -->
-  <div id="view-settings" class="view">
-    <div class="form-section">
+<!-- Settings Modal -->
+<div id="modal-settings" class="modal-overlay" onclick="closeModal(event, 'settings')">
+  <div class="modal-content" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="closeModal(null, 'settings')">✕</button>
+    <div class="form-section" style="margin-bottom: 0; max-width: none;">
       <h2>Settings</h2>
-      <p class="hint" style="margin-bottom:16px">Stored in localStorage on this device.</p>
+      <p class="hint">Preferences are saved locally on this device.</p>
 
       <label for="s-backend">Backend URL</label>
       <input id="s-backend" type="url" placeholder="https://api.example.com">
 
       <label for="s-apikey">API Key</label>
-      <input id="s-apikey" type="text" placeholder="your bearer token">
+      <input id="s-apikey" type="text" placeholder="Your bearer token">
 
       <label for="s-ncurl">Nextcloud WebDAV URL</label>
       <input id="s-ncurl" type="url" placeholder="https://nc.example.com/public.php/webdav">
 
       <label for="s-nctoken">Nextcloud Share Token</label>
-      <input id="s-nctoken" type="text" placeholder="Z4pZJPaLrNbkcxT">
+      <input id="s-nctoken" type="text" placeholder="Token string">
 
       <div class="toggle-row">
         <input type="checkbox" id="s-owner">
         <label for="s-owner">I am the owner (enables GDrive actions)</label>
       </div>
 
-      <button class="btn btn-primary" onclick="saveSettings()">Save settings</button>
+      <button class="btn btn-primary" style="width: 100%" onclick="saveSettings()">Save Settings</button>
     </div>
   </div>
-</main>
+</div>
 
 <div id="toast"></div>
 
+<script>
+  // Theme toggle logic
+  function setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('theme', theme);
+    document.getElementById('meta-theme-color').setAttribute('content', theme === 'dark' ? '#000000' : '#ffffff');
+    
+    // Update icon
+    const icon = document.getElementById('theme-icon');
+    if (theme === 'dark') {
+      icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>';
+    } else {
+      icon.innerHTML = '<circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>';
+    }
+  }
+
+  function toggleTheme() {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  }
+
+  // Initialize theme
+  const savedTheme = localStorage.getItem('theme');
+  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  if (savedTheme) {
+    setTheme(savedTheme);
+  } else if (prefersDark) {
+    setTheme('dark');
+  } else {
+    setTheme('light');
+  }
+</script>
 <script src="app.js"></script>
 </body>
 </html>
