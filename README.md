@@ -41,12 +41,12 @@ See [`deploy/`](deploy/) for the Caddyfile, systemd unit, and GitHub Actions wor
 
 If you are deploying to a fresh Ubuntu Droplet (or any systemd-based Linux), you can use the interactive setup wizard. 
 
-[![Deploy to DO](https://img.shields.io/badge/Deploy_to_DO-terminal-blue?style=for-the-badge&logo=digitalocean)](https://raw.githubusercontent.com/LazySeaHorse/all-zeroes/main/deploy/setup.sh)
+[![Deploy to DO](https://img.shields.io/badge/Deploy_to_DO-terminal-blue?style=for-the-badge&logo=digitalocean)](https://raw.githubusercontent.com/lazyseahorse/all-zeroes/main/deploy/setup.sh)
 
 Right-click the button above to copy the script link, or simply run the following command in your Droplet console:
 
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/LazySeaHorse/all-zeroes/main/deploy/setup.sh)
+bash <(curl -sL https://raw.githubusercontent.com/lazyseahorse/all-zeroes/main/deploy/setup.sh)
 ```
 
 The wizard will install dependencies, compile the application, generate your API key, and configure Caddy and systemd automatically.

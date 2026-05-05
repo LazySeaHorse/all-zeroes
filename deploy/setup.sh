@@ -14,8 +14,8 @@ echo ""
 
 PUBLIC_IP=$(curl -4 -s ifconfig.me)
 BACKEND_DOMAIN="${PUBLIC_IP}.nip.io"
-GH_PAGES_URL="https://LazySeaHorse.github.io"
-GH_USER="LazySeaHorse"
+GH_PAGES_URL="https://lazyseahorse.github.io"
+GH_USER="lazyseahorse"
 
 echo "Auto-detected Public IP: $PUBLIC_IP"
 echo "Using Backend Domain: $BACKEND_DOMAIN"
@@ -74,7 +74,7 @@ cd /tmp
 rm -rf all-zeroes
 git clone https://github.com/$GH_USER/all-zeroes.git
 cd all-zeroes/backend
-/usr/local/go/bin/go mod download
+/usr/local/go/bin/go mod tidy
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 /usr/local/go/bin/go build -o zerorated ./cmd/server
 sudo mv zerorated /opt/zerorated/server
 sudo chmod +x /opt/zerorated/server
