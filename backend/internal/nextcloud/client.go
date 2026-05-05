@@ -23,6 +23,7 @@ func Mkdir(ctx context.Context, url, token string) error {
 		return err
 	}
 	req.SetBasicAuth(token, "")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
@@ -42,6 +43,7 @@ func Upload(ctx context.Context, url, token string, body io.Reader, size int64) 
 		return err
 	}
 	req.SetBasicAuth(token, "")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 	req.ContentLength = size
 
 	resp, err := httpClient.Do(req)
@@ -63,6 +65,7 @@ func Delete(ctx context.Context, url, token string) error {
 		return err
 	}
 	req.SetBasicAuth(token, "")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
