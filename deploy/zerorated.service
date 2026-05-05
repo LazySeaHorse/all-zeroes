@@ -1,0 +1,21 @@
+[Unit]
+Description=Zero-rated download manager
+After=network.target
+
+[Service]
+Type=simple
+User=zerorated
+ExecStart=/opt/zerorated/server
+Restart=always
+RestartSec=5
+Environment=DB_PATH=/var/lib/zerorated/state.db
+Environment=SCRATCH_DIR=/var/lib/zerorated/scratch
+Environment=LISTEN_ADDR=127.0.0.1:8080
+Environment=ALLOWED_ORIGINS=https://myuser.github.io
+Environment=USERS_FILE=/etc/zerorated/users.json
+Environment=RCLONE_REMOTE=gdrive:zerorated
+Environment=MAX_CONCURRENT_ACQUIRES=4
+Environment=CHUNK_SIZE_BYTES=1610612736
+
+[Install]
+WantedBy=multi-user.target

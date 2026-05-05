@@ -1,0 +1,4 @@
+[
+  {"api_key": "change-me-use-a-real-secret-here-32c", "name": "me", "is_owner": true},
+  {"api_key": "friend-key-also-change-this-secret00", "name": "friend1", "is_owner": false}
+]

@@ -1,0 +1,42 @@
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - backend/**
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build
+        working-directory: backend
+        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o zerorated ./cmd/server
+
+      - name: Copy binary
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: backend/zerorated
+          target: /tmp/
+
+      - name: Restart service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            sudo mv /tmp/backend/zerorated /opt/zerorated/server
+            sudo chmod +x /opt/zerorated/server
+            sudo systemctl restart zerorated
+            systemctl is-active zerorated
