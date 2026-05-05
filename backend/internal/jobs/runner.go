@@ -44,6 +44,9 @@ type runner struct {
 func (r *runner) run(ctx context.Context) error {
 	switch r.job.Status {
 	case db.StatusQueued, db.StatusAcquiring:
+		if r.job.Stage == "stream" {
+			return r.runStream(ctx)
+		}
 		if err := r.acquire(ctx); err != nil {
 			return err
 		}
@@ -62,6 +65,23 @@ func (r *runner) run(ctx context.Context) error {
 		return r.deliver(ctx)
 	}
 	return nil
+}
+
+// runStream handles stream-tier jobs: streams each chunk directly source → Nextcloud.
+// The global semaphore is held for the full duration since we continuously pull from source.
+func (r *runner) runStream(ctx context.Context) error {
+	select {
+	case <-r.acqSem:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { r.acqSem <- struct{}{} }()
+
+	if err := db.SetJobStatus(r.db, r.job.ID, db.StatusAcquiring); err != nil {
+		return err
+	}
+	r.notify(r.job.UserKey, r.job.ID)
+	return r.deliver(ctx) // deliver() handles setup + chunk loop
 }
 
 // acquire downloads the source URL to scratch disk.
@@ -197,51 +217,67 @@ func (r *runner) deliver(ctx context.Context) error {
 	return nil
 }
 
-// setupDelivery pre-computes SHA256 for each chunk, inserts chunk rows, and uploads the manifest.
+// setupDelivery initialises chunks, creates the NC directory, and uploads the manifest.
+// For VPS: opens scratch file and pre-computes SHA256 per chunk.
+// For stream: uses the size from the HEAD check; SHA256 is computed during upload.
 func (r *runner) setupDelivery(ctx context.Context) ([]db.Chunk, error) {
-	f, err := os.Open(r.job.ScratchPath)
-	if err != nil {
-		return nil, fmt.Errorf("open scratch: %w", err)
-	}
-	defer f.Close()
+	var fileSize int64
+	var chunks []db.Chunk
 
-	info, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	fileSize := info.Size()
-	if r.job.Size == nil {
-		if err := db.SetJobSize(r.db, r.job.ID, fileSize); err != nil {
+	if r.job.Stage == "stream" {
+		if r.job.Size == nil {
+			return nil, errors.New("stream job has no file size")
+		}
+		fileSize = *r.job.Size
+		n := numChunks(fileSize, r.cfg.ChunkSize)
+		chunks = make([]db.Chunk, n)
+		for i := 0; i < n; i++ {
+			_, size := chunkRange(i, fileSize, r.cfg.ChunkSize)
+			chunks[i] = db.Chunk{JobID: r.job.ID, Idx: i, Size: size, Status: db.ChunkPending}
+		}
+	} else {
+		f, err := os.Open(r.job.ScratchPath)
+		if err != nil {
+			return nil, fmt.Errorf("open scratch: %w", err)
+		}
+		defer f.Close()
+
+		info, err := f.Stat()
+		if err != nil {
 			return nil, err
 		}
-		r.job.Size = &fileSize
+		fileSize = info.Size()
+		if r.job.Size == nil {
+			if err := db.SetJobSize(r.db, r.job.ID, fileSize); err != nil {
+				return nil, err
+			}
+			r.job.Size = &fileSize
+		}
+
+		n := numChunks(fileSize, r.cfg.ChunkSize)
+		chunks = make([]db.Chunk, n)
+		for i := 0; i < n; i++ {
+			start, size := chunkRange(i, fileSize, r.cfg.ChunkSize)
+			h := sha256.New()
+			if _, err := io.Copy(h, io.NewSectionReader(f, start, size)); err != nil {
+				return nil, fmt.Errorf("sha256 chunk %d: %w", i, err)
+			}
+			chunks[i] = db.Chunk{
+				JobID:  r.job.ID,
+				Idx:    i,
+				Size:   size,
+				SHA256: hex.EncodeToString(h.Sum(nil)),
+				Status: db.ChunkPending,
+			}
+		}
 	}
 
-	n := numChunks(fileSize, r.cfg.ChunkSize)
-	chunks := make([]db.Chunk, n)
-	for i := 0; i < n; i++ {
-		start, size := chunkRange(i, fileSize, r.cfg.ChunkSize)
-		h := sha256.New()
-		if _, err := io.Copy(h, io.NewSectionReader(f, start, size)); err != nil {
-			return nil, fmt.Errorf("sha256 chunk %d: %w", i, err)
-		}
-		chunks[i] = db.Chunk{
-			JobID:  r.job.ID,
-			Idx:    i,
-			Size:   size,
-			SHA256: hex.EncodeToString(h.Sum(nil)),
-			Status: db.ChunkPending,
-		}
-	}
-
-	// Create job directory on Nextcloud.
 	if err := withRetry(ctx, func() error {
 		return nextcloud.Mkdir(ctx, r.ncURL(""), r.job.NextcloudToken)
 	}); err != nil {
 		return nil, fmt.Errorf("NC mkdir: %w", err)
 	}
 
-	// Upload manifest.
 	manifest := buildManifest(r.job.ID, r.job.Filename, fileSize, chunks)
 	data, _ := json.Marshal(manifest)
 	if err := withRetry(ctx, func() error {
@@ -265,6 +301,9 @@ func (r *runner) deliverChunk(ctx context.Context, chunk *db.Chunk) error {
 
 	chunkURL := r.ncChunkURL(chunk.Idx)
 	err := withRetry(ctx, func() error {
+		if r.job.Stage == "stream" {
+			return r.streamChunkOnce(ctx, chunk, chunkURL)
+		}
 		return r.uploadChunkOnce(ctx, chunk, chunkURL)
 	})
 	if err != nil {
@@ -291,6 +330,40 @@ func (r *runner) deliverChunk(ctx context.Context, chunk *db.Chunk) error {
 	}
 	r.notify(r.job.UserKey, r.job.ID)
 	return nil
+}
+
+// streamChunkOnce fetches one byte-range from the source and pipes it directly to Nextcloud.
+// SHA256 is computed in-flight via TeeReader and stored in the DB after upload.
+func (r *runner) streamChunkOnce(ctx context.Context, chunk *db.Chunk, chunkURL string) error {
+	start, size := chunkRange(chunk.Idx, *r.job.Size, r.cfg.ChunkSize)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.job.URL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, start+size-1))
+	applyHeaders(req, r.job.HeadersJSON)
+
+	resp, err := downloadClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusPartialContent {
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return noRetryErr{fmt.Errorf("source returned %d", resp.StatusCode)}
+		}
+		return fmt.Errorf("source returned %d (expected 206)", resp.StatusCode)
+	}
+
+	h := sha256.New()
+	if err := nextcloud.Upload(ctx, chunkURL, r.job.NextcloudToken,
+		io.TeeReader(resp.Body, h), size); err != nil {
+		return err
+	}
+
+	return db.SetChunkSHA256(r.db, r.job.ID, chunk.Idx, hex.EncodeToString(h.Sum(nil)))
 }
 
 func (r *runner) uploadChunkOnce(ctx context.Context, chunk *db.Chunk, chunkURL string) error {
@@ -336,6 +409,9 @@ func chunkRange(idx int, fileSize, chunkSize int64) (start, size int64) {
 	return start, end - start
 }
 
+// noRetryErr marks an error that withRetry should not attempt again.
+type noRetryErr struct{ error }
+
 func withRetry(ctx context.Context, fn func() error) error {
 	delays := []time.Duration{time.Second, 4 * time.Second, 16 * time.Second}
 	var last error
@@ -344,8 +420,8 @@ func withRetry(ctx context.Context, fn func() error) error {
 		if last == nil {
 			return nil
 		}
-		if nextcloud.IsClientError(last) {
-			return last // 4xx: do not retry
+		if _, ok := last.(noRetryErr); ok || nextcloud.IsClientError(last) {
+			return last // non-retriable
 		}
 		if errors.Is(last, context.Canceled) || errors.Is(last, context.DeadlineExceeded) {
 			return last

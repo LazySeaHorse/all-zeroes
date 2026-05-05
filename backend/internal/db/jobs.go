@@ -235,6 +235,11 @@ func GetChunks(db *sql.DB, jobID string) ([]Chunk, error) {
 	return chunks, rows.Err()
 }
 
+func SetChunkSHA256(db *sql.DB, jobID string, idx int, digest string) error {
+	_, err := db.Exec(`UPDATE chunks SET sha256=? WHERE job_id=? AND idx=?`, digest, jobID, idx)
+	return err
+}
+
 func SetChunkStatus(db *sql.DB, jobID string, idx int, status string) error {
 	now := time.Now().Unix()
 	switch status {

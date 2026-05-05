@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -80,11 +82,23 @@ func submitHandler(mgr jobManager, database *sql.DB) http.HandlerFunc {
 		if stage == "" {
 			stage = "vps"
 		}
+		// For stream tier, we capture file size from the HEAD check before building
+		// the job struct (so we can set j.Size at construction time).
+		var streamSize *int64
+
 		switch stage {
 		case "vps":
 			// supported
-		case "stream", "gdrive":
-			http.Error(w, stage+" stage not implemented yet", http.StatusNotImplemented)
+		case "stream":
+			// Verify Range support and capture file size before creating the job.
+			size, err := checkRangeSupport(r.Context(), req.URL, req.Referer, req.UserAgent)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			streamSize = &size
+		case "gdrive":
+			http.Error(w, "gdrive stage not implemented yet", http.StatusNotImplemented)
 			return
 		default:
 			http.Error(w, "stage must be vps, stream, or gdrive", http.StatusBadRequest)
@@ -116,6 +130,7 @@ func submitHandler(mgr jobManager, database *sql.DB) http.HandlerFunc {
 			URL:            req.URL,
 			HeadersJSON:    headersJSON,
 			Filename:       filename,
+			Size:           streamSize,
 			Stage:          stage,
 			Status:         db.StatusQueued,
 			NextcloudURL:   req.NextcloudURL,
@@ -255,6 +270,40 @@ func deliverHandler(mgr jobManager, database *sql.DB) http.HandlerFunc {
 		mgr.StartDeliver(j)
 		w.WriteHeader(http.StatusAccepted)
 	}
+}
+
+var headClient = &http.Client{Timeout: 30 * time.Second}
+
+// checkRangeSupport performs a HEAD request and verifies the source supports byte-range
+// requests. Returns the file size on success, or a user-friendly error on failure.
+func checkRangeSupport(ctx context.Context, rawURL, referer, userAgent string) (int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, rawURL, nil)
+	if err != nil {
+		return 0, fmt.Errorf("invalid URL: %w", err)
+	}
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	}
+
+	resp, err := headClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("HEAD request failed: %w", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("HEAD returned %d", resp.StatusCode)
+	}
+	if resp.Header.Get("Accept-Ranges") != "bytes" {
+		return 0, errors.New("source does not support Range requests; use stage=vps")
+	}
+	if resp.ContentLength <= 0 {
+		return 0, errors.New("source did not return Content-Length; use stage=vps")
+	}
+	return resp.ContentLength, nil
 }
 
 // jobToResponse converts a Job and its chunks to the response shape.
