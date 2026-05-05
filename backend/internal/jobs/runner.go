@@ -464,6 +464,7 @@ func (r *runner) deliverChunk(ctx context.Context, chunk *db.Chunk) error {
 	if err := db.SetChunkStatus(r.db, r.job.ID, chunk.Idx, db.ChunkUploaded); err != nil {
 		return err
 	}
+	slog.Info("chunk uploaded", "job", r.job.ID, "chunk", chunk.Idx, "size", chunk.Size)
 	r.notify(r.job.UserKey, r.job.ID)
 
 	// Wait for user ack.
@@ -479,6 +480,7 @@ func (r *runner) deliverChunk(ctx context.Context, chunk *db.Chunk) error {
 	if err := db.SetChunkStatus(r.db, r.job.ID, chunk.Idx, db.ChunkAcked); err != nil {
 		return err
 	}
+	slog.Info("chunk acked", "job", r.job.ID, "chunk", chunk.Idx)
 	r.notify(r.job.UserKey, r.job.ID)
 	return nil
 }
@@ -580,6 +582,10 @@ func withRetry(ctx context.Context, fn func() error) error {
 		if attempt >= len(delays) {
 			return last
 		}
+		slog.Warn("transient error, retrying",
+			"attempt", attempt+1,
+			"delay", delays[attempt].String(),
+			"err", last.Error())
 		select {
 		case <-time.After(delays[attempt]):
 		case <-ctx.Done():

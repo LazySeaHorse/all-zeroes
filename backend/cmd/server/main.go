@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"allzeroes/internal/api"
@@ -14,6 +17,11 @@ import (
 )
 
 func main() {
+	// Structured JSON logs — easy to grep and forward to log aggregators.
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})))
+
 	dbPath := envOr("DB_PATH", "state.db")
 	scratchDir := envOr("SCRATCH_DIR", "./scratch")
 	listenAddr := envOr("LISTEN_ADDR", "127.0.0.1:8080")
@@ -71,6 +79,19 @@ func main() {
 		// WriteTimeout unset: SSE connections are long-lived.
 		IdleTimeout: 120 * time.Second,
 	}
+
+	// Graceful shutdown on SIGINT / SIGTERM.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-quit
+		slog.Info("shutting down gracefully…")
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			slog.Error("shutdown error", "err", err)
+		}
+	}()
 
 	slog.Info("listening", "addr", listenAddr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
