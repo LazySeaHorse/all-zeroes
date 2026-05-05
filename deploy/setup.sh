@@ -12,7 +12,7 @@ echo " - rclone (for GDrive support)"
 echo " - The backend Go binary as a systemd service"
 echo ""
 
-PUBLIC_IP=$(curl -s ifconfig.me)
+PUBLIC_IP=$(curl -4 -s ifconfig.me)
 BACKEND_DOMAIN="${PUBLIC_IP}.nip.io"
 GH_PAGES_URL="https://LazySeaHorse.github.io"
 GH_USER="LazySeaHorse"
@@ -72,7 +72,7 @@ fi
 
 cd /tmp
 rm -rf all-zeroes
-git clone https://github.com/$GH_USER/all-zeroes.git || echo "Warning: repository not found, compilation might fail."
+git clone https://github.com/$GH_USER/all-zeroes.git
 cd all-zeroes/backend
 /usr/local/go/bin/go mod download
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 /usr/local/go/bin/go build -o zerorated ./cmd/server
