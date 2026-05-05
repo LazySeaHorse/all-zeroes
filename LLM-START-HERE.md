@@ -45,6 +45,8 @@ All `/api/jobs*` handlers. Notes:
 - For `stage=gdrive`, requires `is_owner`.
 - `jobManager` is an interface (not the concrete `*jobs.Manager`) — the API layer only sees `Start/AckChunk/Cancel/StartDeliver/MoveToGDrive`. Keeps tests simple.
 - `jobToResponse` builds a `current_chunk.url` for the PWA via `jobs.ChunkURL` — the same helper the runner uses to PUT the chunk. Single source of truth; don't reintroduce a parallel formatter.
+- The response also exposes `referer` and `user_agent` (parsed out of `headers_json`) so the PWA can resubmit a job with the same params on retry without a dedicated server-side clone endpoint.
+- `DELETE /api/jobs/{id}` calls `mgr.Purge` (full removal: cancel goroutine if alive, remove scratch dir, drop the row). Works on any state, including terminal — that's how the PWA "delete from list" button cleans up DONE/FAILED/CANCELED jobs.
 
 ### [backend/internal/api/sse.go](backend/internal/api/sse.go)
 `Broadcaster`: per-user fan-out via channels (`map[userKey][]chan []byte`). Slow subscribers get **dropped** (non-blocking send), not buffered indefinitely. `PublishJobUpdate` re-reads the job from DB so SSE always reflects committed state, not in-memory caller view. `sseHandler` sends an initial burst of all the user's jobs, then live updates, with a 15s `: heartbeat\n\n` comment to defeat proxy idle timeouts. `X-Accel-Buffering: no` for nginx.
@@ -54,9 +56,11 @@ Owns goroutines. Key state:
 - `acqSem chan struct{}` — token-bucket semaphore for `MAX_CONCURRENT_ACQUIRES`. Pre-filled at construction; `<-acqSem` to acquire, send back to release.
 - `userMu sync.Map` of `userKey → *sync.Mutex` — enforces "only one chunk in flight per user" (matches the 3 GB Nextcloud cap; lazy-allocated via `LoadOrStore`).
 - `ackChans sync.Map` of `jobID → chan int` — runner waits on this; `AckChunk` does a non-blocking send (returns false if no runner / channel full).
-- `cancels sync.Map` of `jobID → CancelFunc` for `Cancel`.
+- `cancels sync.Map` of `jobID → CancelFunc` for `Cancel` / `Purge`.
 
 `Cancel` sets DB status to CANCELED **before** invoking the context cancel — so when the goroutine unwinds and `launch`'s post-run check sees `StatusCanceled`, it skips overwriting with FAILED. Order matters.
+
+`Purge` is the deletion path used by `DELETE /api/jobs/{id}`. It cancels the goroutine if alive, removes the per-job scratch directory (with a `<SCRATCH_DIR>/<jobID>` fallback in case `scratch_path` wasn't persisted yet — relevant when killing a job mid-acquire), then deletes the row. The post-run check in `launch` does `db.GetJob` which returns nil after purge, so the goroutine doesn't try to SetJobFailed on a deleted row. No extra coordination needed.
 
 `Resurrect` is called once at boot, before HTTP traffic — relaunches every non-terminal job. This is the durability story (covers VPS reboot/deploy/crash).
 
@@ -103,6 +107,8 @@ All client logic.
 - Settings stored in `localStorage` under `az_settings`: `backendURL`, `apiKey`, `ncURL`, `ncToken`, `isOwner`. The `isOwner` flag is purely a UI hint to show/hide the "Move to GDrive" button — server enforces actual permission.
 - SSE: implemented via `fetch` + `ReadableStream` (not `EventSource`) so the `Authorization: Bearer` header can be set. `EventSource` doesn't support custom headers. Reconnects with exponential backoff up to 30s.
 - Chunk download: prefers `showSaveFilePicker` (Chromium) for streaming-to-disk; falls back to a buffered `Blob` + invisible `<a download>`. The blob fallback won't work for chunks bigger than browser RAM, so most users need a Chromium browser.
+- Delete button is shown on every status; calls `DELETE /api/jobs/{id}` which now does a full purge (goroutine + scratch + row) regardless of state.
+- Retry button (FAILED / CANCELED) reads `url`/`filename`/`referer`/`user_agent`/`stage`/`deliver_now` from the response, combines with current Nextcloud creds from `localStorage`, POSTs `/api/jobs`, then deletes the old row. Implementation choice: retry creates a **new** job rather than mutating the dead one — avoids reasoning about orphaned chunks, partial scratch, and the cleared `nextcloud_token` on terminal jobs.
 - `buildConcatCmd` detects Windows via `navigator.userAgent` and emits `copy /b` instead of `cat`.
 - `esc()` is the only HTML-escape utility — used everywhere user-controlled strings (filename, error, chunk URL, sha) are interpolated into HTML.
 

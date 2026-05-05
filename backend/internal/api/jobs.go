@@ -19,7 +19,7 @@ import (
 type jobManager interface {
 	Start(j *db.Job)
 	AckChunk(jobID string, idx int) bool
-	Cancel(jobID string)
+	Purge(jobID string)
 	StartDeliver(j *db.Job)
 	MoveToGDrive(j *db.Job)
 }
@@ -41,6 +41,8 @@ type jobResponse struct {
 	ID            string     `json:"id"`
 	URL           string     `json:"url"`
 	Filename      string     `json:"filename"`
+	Referer       string     `json:"referer,omitempty"`
+	UserAgent     string     `json:"user_agent,omitempty"`
 	Size          *int64     `json:"size"`
 	Status        string     `json:"status"`
 	Stage         string     `json:"stage"`
@@ -253,7 +255,7 @@ func deleteJobHandler(mgr jobManager, database *sql.DB) http.HandlerFunc {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		mgr.Cancel(j.ID)
+		mgr.Purge(j.ID)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -355,10 +357,24 @@ func jobToResponse(j *db.Job, chunks []db.Chunk) jobResponse {
 		}
 	}
 
+	var referer, userAgent string
+	if j.HeadersJSON != "" {
+		var h struct {
+			Referer   string `json:"referer"`
+			UserAgent string `json:"user_agent"`
+		}
+		if json.Unmarshal([]byte(j.HeadersJSON), &h) == nil {
+			referer = h.Referer
+			userAgent = h.UserAgent
+		}
+	}
+
 	return jobResponse{
 		ID:            j.ID,
 		URL:           j.URL,
 		Filename:      j.Filename,
+		Referer:       referer,
+		UserAgent:     userAgent,
 		Size:          j.Size,
 		Status:        j.Status,
 		Stage:         j.Stage,

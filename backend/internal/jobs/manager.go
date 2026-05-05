@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"allzeroes/internal/db"
@@ -87,6 +89,30 @@ func (m *Manager) Cancel(jobID string) {
 	db.SetJobCanceled(m.db, jobID) //nolint:errcheck
 	if v, ok := m.cancels.Load(jobID); ok {
 		v.(context.CancelFunc)()
+	}
+}
+
+// Purge stops the job's goroutine (if any), removes its scratch directory,
+// and deletes the row from the database. Used by DELETE /api/jobs/{id}.
+//
+// Safe to call on jobs in any state. The goroutine cleanup is async — by the
+// time the runner unwinds, the row is gone and any UPDATE it tries to issue
+// becomes a no-op (UPDATE … WHERE id=? matches zero rows).
+func (m *Manager) Purge(jobID string) {
+	if v, ok := m.cancels.Load(jobID); ok {
+		v.(context.CancelFunc)()
+	}
+	j, _ := db.GetJob(m.db, jobID)
+	if j != nil && j.ScratchPath != "" {
+		// scratch_path is <SCRATCH_DIR>/<jobID>/<filename>; remove the per-job dir.
+		os.RemoveAll(filepath.Dir(j.ScratchPath)) //nolint:errcheck
+	} else {
+		// Belt-and-braces: scratch_path may not have been persisted yet if we're
+		// killing a job mid-acquire. Try the conventional location too.
+		os.RemoveAll(filepath.Join(m.cfg.ScratchDir, jobID)) //nolint:errcheck
+	}
+	if err := db.DeleteJob(m.db, jobID); err != nil {
+		slog.Error("delete job row", "id", jobID, "err", err)
 	}
 }
 

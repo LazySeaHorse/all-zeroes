@@ -200,12 +200,24 @@ function renderJobCard(job) {
   } else if (job.status === 'DONE') {
     body = renderDone(job);
   } else if (job.status === 'FAILED') {
-    body = `<p class="job-error">Error: ${esc(job.error || 'unknown')}</p>`;
+    body = `
+      <p class="job-error">Error: ${esc(job.error || 'unknown')}</p>
+      <div class="chunk-action" style="margin-top: 12px;">
+        <span class="chunk-label">Retry will submit a fresh job with the same URL and headers.</span>
+        <button class="btn btn-primary btn-sm" onclick="retryJob('${esc(job.id)}')">↻ Retry</button>
+      </div>`;
+  } else if (job.status === 'CANCELED') {
+    body = `
+      <div class="chunk-action">
+        <span class="chunk-label">Job canceled.</span>
+        <button class="btn btn-primary btn-sm" onclick="retryJob('${esc(job.id)}')">↻ Retry</button>
+      </div>`;
   }
 
-  const deleteBtn = ['DONE', 'FAILED', 'CANCELED'].includes(job.status)
-    ? '' // no delete for terminal states (nothing to clean up server-side)
-    : `<button class="btn btn-ghost btn-sm" onclick="deleteJob('${esc(job.id)}')" title="Cancel job">✕</button>`;
+  const deleteTitle = ['DONE', 'FAILED', 'CANCELED'].includes(job.status)
+    ? 'Delete from list'
+    : 'Cancel and delete';
+  const deleteBtn = `<button class="btn btn-ghost btn-sm" onclick="deleteJob('${esc(job.id)}')" title="${deleteTitle}">✕</button>`;
 
   return `
     <div class="job-card status-${statusLow}">
@@ -373,7 +385,12 @@ async function moveToGdrive(jobId) {
 }
 
 async function deleteJob(jobId) {
-  if (!confirm('Cancel this job? The goroutine will stop and scratch file will be deleted.')) return;
+  const job = state.jobs[jobId];
+  const isTerminal = job && ['DONE', 'FAILED', 'CANCELED'].includes(job.status);
+  const prompt = isTerminal
+    ? 'Delete this job from the list? Any scratch file on the VPS will be removed.'
+    : 'Cancel and delete this job? The goroutine will stop and the scratch file will be deleted.';
+  if (!confirm(prompt)) return;
   try {
     const resp = await apiFetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
     if (resp.ok) {
@@ -383,6 +400,41 @@ async function deleteJob(jobId) {
       const t = await resp.text();
       toast(`Delete failed: ${t}`, true);
     }
+  } catch (e) {
+    toast(`Error: ${e.message}`, true);
+  }
+}
+
+async function retryJob(jobId) {
+  const job = state.jobs[jobId];
+  if (!job) return;
+  const s = getSettings();
+  if (!s.ncURL || !s.ncToken) {
+    toast('Configure Nextcloud URL and token in Settings.', true);
+    return;
+  }
+
+  const body = {
+    url: job.url,
+    filename: job.filename || undefined,
+    referer: job.referer || undefined,
+    user_agent: job.user_agent || undefined,
+    stage: job.stage,
+    deliver_now: job.deliver_now,
+    nextcloud_url: s.ncURL,
+    nextcloud_token: s.ncToken,
+  };
+
+  try {
+    const resp = await apiFetch('/api/jobs', { method: 'POST', body: JSON.stringify(body) });
+    if (!resp.ok) { const t = await resp.text(); toast(`Retry failed: ${t}`, true); return; }
+    const newJob = await resp.json();
+    state.jobs[newJob.id] = newJob;
+    // Remove the old failed/canceled job — it's been superseded.
+    await apiFetch(`/api/jobs/${jobId}`, { method: 'DELETE' }).catch(() => {});
+    delete state.jobs[jobId];
+    renderJobsView();
+    toast('Retrying as new job.');
   } catch (e) {
     toast(`Error: ${e.message}`, true);
   }

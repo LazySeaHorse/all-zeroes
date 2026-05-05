@@ -192,6 +192,12 @@ func SetJobCanceled(db *sql.DB, id string) error {
 	return err
 }
 
+// DeleteJob removes a job row. Chunks cascade via foreign key.
+func DeleteJob(db *sql.DB, id string) error {
+	_, err := db.Exec(`DELETE FROM jobs WHERE id = ?`, id)
+	return err
+}
+
 // --- Chunks ---
 
 func InsertChunks(db *sql.DB, jobID string, chunks []Chunk) error {
