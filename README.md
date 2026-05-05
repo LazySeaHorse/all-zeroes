@@ -69,6 +69,22 @@ Users are upserted at startup — edit the file and restart to add/remove users.
 
 See [`deploy/`](deploy/) for the Caddyfile, systemd unit, and GitHub Actions workflow.
 
+### 1-Click Terminal Setup Wizard
+
+If you are deploying to a fresh Ubuntu Droplet (or any systemd-based Linux), you can use the interactive setup wizard. 
+
+[![Deploy to DO](https://img.shields.io/badge/Deploy_to_DO-terminal-blue?style=for-the-badge&logo=digitalocean)](https://raw.githubusercontent.com/LazySeaHorse/all-zeroes/main/deploy/setup.sh)
+
+Right-click the button above to copy the script link, or simply run the following command in your Droplet console:
+
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/LazySeaHorse/all-zeroes/main/deploy/setup.sh)
+```
+
+The wizard will install dependencies, compile the application, generate your API key, and configure Caddy and systemd automatically.
+
+### Manual Setup
+
 ```bash
 # On the VPS (one-time setup)
 sudo useradd -r -s /sbin/nologin zerorated
