@@ -8,6 +8,7 @@ echo ""
 echo "This wizard will install and configure:"
 echo " - Go 1.22"
 echo " - Caddy (for TLS/HTTPS)"
+echo " - rclone (for GDrive support)"
 echo " - The backend Go binary as a systemd service"
 echo ""
 
@@ -49,7 +50,7 @@ sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https cu
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg --yes
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
 sudo apt update
-sudo apt install -y caddy
+sudo apt install -y caddy rclone
 
 echo "[4/6] Configuring Caddy..."
 cat <<EOF | sudo tee /etc/caddy/Caddyfile > /dev/null
@@ -113,4 +114,7 @@ echo "Backend URL:   https://$BACKEND_DOMAIN"
 echo "Admin API Key: $API_KEY"
 echo ""
 echo "IMPORTANT: Save the API Key! You will need to enter it in the PWA Settings tab."
+echo ""
+echo "NOTE: If you plan to use the GDrive tier, you must now run:"
+echo "      'rclone config' and create a remote named 'gdrive'."
 echo "========================================="

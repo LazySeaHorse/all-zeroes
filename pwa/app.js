@@ -20,10 +20,10 @@ function getSettings() {
 function saveSettings() {
   const s = {
     backendURL: document.getElementById('s-backend').value.replace(/\/$/, ''),
-    apiKey:     document.getElementById('s-apikey').value,
-    ncURL:      document.getElementById('s-ncurl').value.replace(/\/$/, ''),
-    ncToken:    document.getElementById('s-nctoken').value,
-    isOwner:    document.getElementById('s-owner').checked,
+    apiKey: document.getElementById('s-apikey').value,
+    ncURL: document.getElementById('s-ncurl').value.replace(/\/$/, ''),
+    ncToken: document.getElementById('s-nctoken').value,
+    isOwner: document.getElementById('s-owner').checked,
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
   toast('Settings saved.');
@@ -34,9 +34,9 @@ function saveSettings() {
 function loadSettingsForm() {
   const s = getSettings();
   document.getElementById('s-backend').value = s.backendURL || '';
-  document.getElementById('s-apikey').value  = s.apiKey    || '';
-  document.getElementById('s-ncurl').value   = s.ncURL     || '';
-  document.getElementById('s-nctoken').value = s.ncToken   || '';
+  document.getElementById('s-apikey').value = s.apiKey || '';
+  document.getElementById('s-ncurl').value = s.ncURL || '';
+  document.getElementById('s-nctoken').value = s.ncToken || '';
   document.getElementById('s-owner').checked = !!s.isOwner;
 }
 
@@ -275,12 +275,12 @@ async function submitJob() {
 
   const body = {
     url,
-    filename:       document.getElementById('f-filename').value.trim() || undefined,
-    referer:        document.getElementById('f-referer').value.trim()  || undefined,
-    user_agent:     document.getElementById('f-ua').value.trim()       || undefined,
-    stage:          document.getElementById('f-stage').value,
-    deliver_now:    document.getElementById('f-deliver-now').checked,
-    nextcloud_url:  s.ncURL,
+    filename: document.getElementById('f-filename').value.trim() || undefined,
+    referer: document.getElementById('f-referer').value.trim() || undefined,
+    user_agent: document.getElementById('f-ua').value.trim() || undefined,
+    stage: document.getElementById('f-stage').value,
+    deliver_now: document.getElementById('f-deliver-now').checked,
+    nextcloud_url: s.ncURL,
     nextcloud_token: s.ncToken,
   };
 
@@ -290,7 +290,7 @@ async function submitJob() {
     const job = await resp.json();
     state.jobs[job.id] = job;
     // Clear form
-    ['f-url','f-filename','f-referer','f-ua'].forEach(id => document.getElementById(id).value = '');
+    ['f-url', 'f-filename', 'f-referer', 'f-ua'].forEach(id => document.getElementById(id).value = '');
     toast('Job submitted.');
     showView('jobs');
   } catch (e) {
