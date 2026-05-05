@@ -5,10 +5,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"allzeroes/internal/api"
 	"allzeroes/internal/db"
+	"allzeroes/internal/jobs"
 )
 
 func main() {
@@ -17,8 +19,9 @@ func main() {
 	listenAddr := envOr("LISTEN_ADDR", "127.0.0.1:8080")
 	allowedOrigins := envOr("ALLOWED_ORIGINS", "http://localhost:5173")
 	usersFile := envOr("USERS_FILE", "users.json")
-
-	_ = scratchDir // used in Phase 2
+	rcloneRemote := envOr("RCLONE_REMOTE", "gdrive:zerorated")
+	maxAcqs := envInt("MAX_CONCURRENT_ACQUIRES", 4)
+	chunkSize := envInt64("CHUNK_SIZE_BYTES", 1_610_612_736) // 1.5 GB
 
 	database, err := db.Open(dbPath)
 	if err != nil {
@@ -38,13 +41,29 @@ func main() {
 	}
 	slog.Info("users loaded", "count", len(users))
 
-	router := api.NewRouter(database, allowedOrigins)
+	if err := os.MkdirAll(scratchDir, 0o755); err != nil {
+		slog.Error("create scratch dir", "err", err)
+		os.Exit(1)
+	}
+
+	mgr := jobs.New(database, jobs.Config{
+		ScratchDir:        scratchDir,
+		ChunkSize:         chunkSize,
+		MaxConcurrentAcqs: maxAcqs,
+		RcloneRemote:      rcloneRemote,
+	})
+	if err := mgr.Resurrect(); err != nil {
+		slog.Error("resurrect jobs", "err", err)
+		os.Exit(1)
+	}
+
+	router := api.NewRouter(database, mgr, allowedOrigins)
 
 	srv := &http.Server{
 		Addr:        listenAddr,
 		Handler:     router,
 		ReadTimeout: 30 * time.Second,
-		// WriteTimeout intentionally unset: SSE connections are long-lived.
+		// WriteTimeout unset: SSE connections are long-lived.
 		IdleTimeout: 120 * time.Second,
 	}
 
@@ -58,6 +77,24 @@ func main() {
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+func envInt64(key string, fallback int64) int64 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
 	}
 	return fallback
 }
