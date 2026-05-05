@@ -9,38 +9,6 @@ Download arbitrarily large files from the internet through a zero-rated Nextclou
 - `rclone` configured with a `gdrive` remote (GDrive tier only)
 - A Nextcloud instance with a public share (WebDAV URL + token)
 
-## Running locally
-
-```bash
-cd backend
-
-# First time only: fetch dependencies
-go mod tidy
-
-# Create a users file (copy and edit the example)
-cp users.example.json users.json
-# edit users.json with your API key(s)
-
-# Run the server
-DB_PATH=./state.db \
-SCRATCH_DIR=./scratch \
-LISTEN_ADDR=127.0.0.1:8080 \
-ALLOWED_ORIGINS="http://localhost:5173,http://localhost:*" \
-USERS_FILE=./users.json \
-go run ./cmd/server
-
-# Smoke test
-curl http://localhost:8080/healthz
-# {"status":"ok"}
-
-# Auth test
-curl -H "Authorization: Bearer your-api-key-here" http://localhost:8080/api/jobs
-# 501 not implemented  (correct — Phase 2 fills this in)
-
-curl http://localhost:8080/api/jobs
-# 401 unauthorized
-```
-
 ## Configuration (environment variables)
 
 | Variable | Default | Description |
