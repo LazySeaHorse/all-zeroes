@@ -74,6 +74,7 @@ cd /tmp
 rm -rf all-zeroes
 git clone https://github.com/$GH_USER/all-zeroes.git || echo "Warning: repository not found, compilation might fail."
 cd all-zeroes/backend
+/usr/local/go/bin/go mod download
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 /usr/local/go/bin/go build -o zerorated ./cmd/server
 sudo mv zerorated /opt/zerorated/server
 sudo chmod +x /opt/zerorated/server
