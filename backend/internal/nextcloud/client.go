@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -45,6 +46,11 @@ func Upload(ctx context.Context, url, token string, body io.Reader, size int64) 
 	req.SetBasicAuth(token, "")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 	req.ContentLength = size
+
+	slog.Info("NC PUT", "url", url, "token_len", len(token), "token_prefix", func() string {
+		if len(token) > 4 { return token[:4] + "..." }
+		return token
+	}(), "size", size)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
