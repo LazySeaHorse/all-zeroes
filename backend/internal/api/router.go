@@ -9,7 +9,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-func NewRouter(database *sql.DB, mgr jobManager, allowedOrigins string) http.Handler {
+func NewRouter(database *sql.DB, mgr jobManager, br *Broadcaster, allowedOrigins string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -22,7 +22,7 @@ func NewRouter(database *sql.DB, mgr jobManager, allowedOrigins string) http.Han
 
 		r.Post("/jobs", submitHandler(mgr, database))
 		r.Get("/jobs", listJobsHandler(database))
-		r.Get("/jobs/stream", notImplemented) // Phase 3
+		r.Get("/jobs/stream", sseHandler(database, br))
 		r.Get("/jobs/{id}", getJobHandler(database))
 		r.Post("/jobs/{id}/chunk-done", chunkDoneHandler(mgr, database))
 		r.Post("/jobs/{id}/deliver", deliverHandler(mgr, database))

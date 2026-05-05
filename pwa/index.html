@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>all-zeroes</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#111827">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:      #111827;
+  --surface: #1f2937;
+  --card:    #374151;
+  --border:  #4b5563;
+  --text:    #f9fafb;
+  --muted:   #9ca3af;
+  --primary: #6366f1;
+  --primary-hover: #4f46e5;
+  --success: #22c55e;
+  --warn:    #f59e0b;
+  --error:   #ef4444;
+  --radius:  8px;
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ── */
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 52px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+header h1 {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--primary);
+  white-space: nowrap;
+}
+nav { display: flex; gap: 4px; flex: 1; }
+nav button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.1s, color 0.1s;
+}
+nav button:hover { background: var(--card); color: var(--text); }
+nav button.active { background: var(--primary); color: white; }
+#sse-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--muted); flex-shrink: 0;
+  transition: background 0.3s;
+}
+#sse-dot.connected { background: var(--success); }
+#sse-dot.disconnected { background: var(--error); }
+
+/* ── Main layout ── */
+main {
+  flex: 1;
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 20px 16px;
+}
+
+/* ── Views ── */
+.view { display: none; }
+.view.active { display: block; }
+
+/* ── Toast ── */
+#toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(80px);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 18px;
+  font-size: 13px;
+  color: var(--text);
+  transition: transform 0.2s;
+  z-index: 100;
+  pointer-events: none;
+}
+#toast.show { transform: translateX(-50%) translateY(0); }
+#toast.error { border-color: var(--error); color: var(--error); }
+
+/* ── Job cards ── */
+.job-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.job-card.status-done { opacity: 0.75; }
+.job-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.job-filename {
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 20px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.badge.queued    { background: var(--card); color: var(--muted); }
+.badge.acquiring { background: #1e3a5f; color: #60a5fa; }
+.badge.staged    { background: #2d2010; color: var(--warn); }
+.badge.delivering { background: #1e1b4b; color: #a5b4fc; }
+.badge.done      { background: #14532d; color: var(--success); }
+.badge.failed    { background: #450a0a; color: var(--error); }
+.badge.canceled  { background: var(--card); color: var(--muted); }
+
+.job-meta { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+
+/* Progress bar */
+.progress-bar {
+  height: 4px;
+  background: var(--card);
+  border-radius: 2px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 2px;
+  transition: width 0.4s;
+}
+
+/* Chunk action area */
+.chunk-action {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.chunk-label { flex: 1; font-size: 13px; color: var(--muted); min-width: 120px; }
+
+/* Concat command */
+.concat-box {
+  margin-top: 10px;
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.concat-box p { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.concat-cmd {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.concat-cmd code {
+  flex: 1;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  color: #a5f3fc;
+  background: var(--surface);
+  padding: 8px 10px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Error message */
+.job-error { color: var(--error); font-size: 13px; margin-top: 6px; }
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted);
+}
+.empty-state p { margin-bottom: 12px; }
+
+/* ── Forms ── */
+.form-section { margin-bottom: 24px; }
+.form-section h2 { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+
+label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+input[type=text], input[type=url], input[type=password], select {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 8px 12px;
+  font-size: 14px;
+  outline: none;
+  margin-bottom: 14px;
+  transition: border-color 0.15s;
+}
+input:focus, select:focus { border-color: var(--primary); }
+select option { background: var(--surface); }
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.toggle-row label { margin: 0; text-transform: none; font-size: 14px; color: var(--text); }
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: opacity 0.1s, background 0.1s;
+  white-space: nowrap;
+  text-decoration: none;
+  color: white;
+}
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: var(--primary); }
+.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-success { background: #15803d; }
+.btn-success:hover:not(:disabled) { background: #166534; }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-ghost {
+  background: var(--card);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover:not(:disabled) { color: var(--text); }
+
+.hint { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>all-zeroes</h1>
+  <nav>
+    <button id="nav-jobs"     onclick="showView('jobs')">Jobs</button>
+    <button id="nav-submit"   onclick="showView('submit')">Submit</button>
+    <button id="nav-settings" onclick="showView('settings')">Settings</button>
+  </nav>
+  <div id="sse-dot" title="SSE connection status"></div>
+</header>
+
+<main>
+  <!-- Jobs view -->
+  <div id="view-jobs" class="view">
+    <div id="jobs-list">
+      <div class="empty-state"><p>Connecting…</p></div>
+    </div>
+  </div>
+
+  <!-- Submit view -->
+  <div id="view-submit" class="view">
+    <div class="form-section">
+      <h2>New download job</h2>
+      <label for="f-url">URL *</label>
+      <input id="f-url" type="url" placeholder="https://example.com/file.zip" autocomplete="off">
+
+      <label for="f-filename">Filename override</label>
+      <input id="f-filename" type="text" placeholder="leave blank to auto-detect">
+
+      <label for="f-referer">Referer</label>
+      <input id="f-referer" type="url" placeholder="https://example.com/">
+
+      <label for="f-ua">User-Agent</label>
+      <input id="f-ua" type="text" placeholder="leave blank to use default">
+
+      <label for="f-stage">Stage</label>
+      <select id="f-stage">
+        <option value="vps" selected>VPS (download to server first)</option>
+        <option value="stream" disabled>Stream (Phase 4)</option>
+        <option value="gdrive" disabled>GDrive (Phase 5)</option>
+      </select>
+
+      <div class="toggle-row">
+        <input type="checkbox" id="f-deliver-now" checked>
+        <label for="f-deliver-now">Deliver now (start chunking immediately after download)</label>
+      </div>
+
+      <p class="hint">Will use settings: Backend <span id="hint-backend">—</span></p>
+      <button class="btn btn-primary" onclick="submitJob()">Submit job</button>
+    </div>
+  </div>
+
+  <!-- Settings view -->
+  <div id="view-settings" class="view">
+    <div class="form-section">
+      <h2>Settings</h2>
+      <p class="hint" style="margin-bottom:16px">Stored in localStorage on this device.</p>
+
+      <label for="s-backend">Backend URL</label>
+      <input id="s-backend" type="url" placeholder="https://api.example.com">
+
+      <label for="s-apikey">API Key</label>
+      <input id="s-apikey" type="password" placeholder="your bearer token">
+
+      <label for="s-ncurl">Nextcloud WebDAV URL</label>
+      <input id="s-ncurl" type="url" placeholder="https://nc.example.com/public.php/webdav">
+
+      <label for="s-nctoken">Nextcloud Share Token</label>
+      <input id="s-nctoken" type="password" placeholder="Z4pZJPaLrNbkcxT">
+
+      <button class="btn btn-primary" onclick="saveSettings()">Save settings</button>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

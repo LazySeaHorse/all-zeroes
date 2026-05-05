@@ -46,18 +46,23 @@ func main() {
 		os.Exit(1)
 	}
 
+	br := api.NewBroadcaster()
+
 	mgr := jobs.New(database, jobs.Config{
 		ScratchDir:        scratchDir,
 		ChunkSize:         chunkSize,
 		MaxConcurrentAcqs: maxAcqs,
 		RcloneRemote:      rcloneRemote,
 	})
+	mgr.OnUpdate = func(userKey, jobID string) {
+		api.PublishJobUpdate(database, br, userKey, jobID)
+	}
 	if err := mgr.Resurrect(); err != nil {
 		slog.Error("resurrect jobs", "err", err)
 		os.Exit(1)
 	}
 
-	router := api.NewRouter(database, mgr, allowedOrigins)
+	router := api.NewRouter(database, mgr, br, allowedOrigins)
 
 	srv := &http.Server{
 		Addr:        listenAddr,

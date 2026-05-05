@@ -41,6 +41,7 @@ type jobResponse struct {
 	Size          *int64     `json:"size"`
 	Status        string     `json:"status"`
 	Stage         string     `json:"stage"`
+	DeliverNow    bool       `json:"deliver_now"`
 	Error         *string    `json:"error"`
 	AcquiredBytes int64      `json:"acquired_bytes"`
 	ChunksTotal   int        `json:"chunks_total"`
@@ -289,6 +290,7 @@ func jobToResponse(j *db.Job, chunks []db.Chunk) jobResponse {
 		Size:          j.Size,
 		Status:        j.Status,
 		Stage:         j.Stage,
+		DeliverNow:    j.DeliverNow,
 		Error:         j.Error,
 		AcquiredBytes: j.AcquiredBytes,
 		ChunksTotal:   total,
