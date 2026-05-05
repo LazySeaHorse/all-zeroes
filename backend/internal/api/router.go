@@ -26,7 +26,7 @@ func NewRouter(database *sql.DB, mgr jobManager, br *Broadcaster, allowedOrigins
 		r.Get("/jobs/{id}", getJobHandler(database))
 		r.Post("/jobs/{id}/chunk-done", chunkDoneHandler(mgr, database))
 		r.Post("/jobs/{id}/deliver", deliverHandler(mgr, database))
-		r.Post("/jobs/{id}/move-to-gdrive", notImplemented) // Phase 5
+		r.Post("/jobs/{id}/move-to-gdrive", moveToGdriveHandler(mgr, database))
 		r.Delete("/jobs/{id}", deleteJobHandler(mgr, database))
 	})
 

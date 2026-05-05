@@ -21,6 +21,7 @@ type jobManager interface {
 	AckChunk(jobID string, idx int) bool
 	Cancel(jobID string)
 	StartDeliver(j *db.Job)
+	MoveToGDrive(j *db.Job)
 }
 
 // submitRequest is the body for POST /api/jobs.
@@ -88,7 +89,7 @@ func submitHandler(mgr jobManager, database *sql.DB) http.HandlerFunc {
 
 		switch stage {
 		case "vps":
-			// supported
+			// supported by anyone
 		case "stream":
 			// Verify Range support and capture file size before creating the job.
 			size, err := checkRangeSupport(r.Context(), req.URL, req.Referer, req.UserAgent)
@@ -98,8 +99,10 @@ func submitHandler(mgr jobManager, database *sql.DB) http.HandlerFunc {
 			}
 			streamSize = &size
 		case "gdrive":
-			http.Error(w, "gdrive stage not implemented yet", http.StatusNotImplemented)
-			return
+			if user.IsOwner == 0 {
+				http.Error(w, "gdrive stage requires owner privileges", http.StatusForbidden)
+				return
+			}
 		default:
 			http.Error(w, "stage must be vps, stream, or gdrive", http.StatusBadRequest)
 			return
@@ -268,6 +271,31 @@ func deliverHandler(mgr jobManager, database *sql.DB) http.HandlerFunc {
 			return
 		}
 		mgr.StartDeliver(j)
+		w.WriteHeader(http.StatusAccepted)
+	}
+}
+
+func moveToGdriveHandler(mgr jobManager, database *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := currentUser(r)
+		if user.IsOwner == 0 {
+			http.Error(w, "owner only", http.StatusForbidden)
+			return
+		}
+		j, err := db.GetJobForUser(database, chi.URLParam(r, "id"), user.APIKey)
+		if err != nil || j == nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if j.Status != db.StatusStaged {
+			http.Error(w, "job is not STAGED", http.StatusConflict)
+			return
+		}
+		if j.Stage != "vps" {
+			http.Error(w, "only vps-staged jobs can be moved to gdrive", http.StatusConflict)
+			return
+		}
+		mgr.MoveToGDrive(j)
 		w.WriteHeader(http.StatusAccepted)
 	}
 }

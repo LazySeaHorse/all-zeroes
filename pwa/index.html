@@ -321,7 +321,7 @@ select option { background: var(--surface); }
       <select id="f-stage">
         <option value="vps" selected>VPS (download to server first)</option>
         <option value="stream">Stream (source → Nextcloud, no disk)</option>
-        <option value="gdrive" disabled>GDrive (Phase 5)</option>
+        <option value="gdrive">GDrive (owner only — archive to Drive)</option>
       </select>
 
       <div class="toggle-row">
@@ -351,6 +351,11 @@ select option { background: var(--surface); }
 
       <label for="s-nctoken">Nextcloud Share Token</label>
       <input id="s-nctoken" type="password" placeholder="Z4pZJPaLrNbkcxT">
+
+      <div class="toggle-row">
+        <input type="checkbox" id="s-owner">
+        <label for="s-owner">I am the owner (enables GDrive actions)</label>
+      </div>
 
       <button class="btn btn-primary" onclick="saveSettings()">Save settings</button>
     </div>

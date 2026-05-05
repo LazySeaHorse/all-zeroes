@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"allzeroes/internal/db"
+	"allzeroes/internal/gdrive"
 	"allzeroes/internal/nextcloud"
 )
 
@@ -44,16 +45,26 @@ type runner struct {
 func (r *runner) run(ctx context.Context) error {
 	switch r.job.Status {
 	case db.StatusQueued, db.StatusAcquiring:
-		if r.job.Stage == "stream" {
+		switch r.job.Stage {
+		case "stream":
 			return r.runStream(ctx)
+		case "gdrive":
+			if err := r.acquireGDrive(ctx); err != nil {
+				return err
+			}
+			if !r.job.DeliverNow {
+				return nil // sits in GDrive; POST /deliver later
+			}
+			return r.deliver(ctx)
+		default: // vps
+			if err := r.acquire(ctx); err != nil {
+				return err
+			}
+			if !r.job.DeliverNow {
+				return nil
+			}
+			return r.deliver(ctx)
 		}
-		if err := r.acquire(ctx); err != nil {
-			return err
-		}
-		if !r.job.DeliverNow {
-			return nil // wait for explicit POST /deliver
-		}
-		return r.deliver(ctx)
 
 	case db.StatusStaged:
 		if !r.job.DeliverNow {
@@ -98,7 +109,21 @@ func (r *runner) acquire(ctx context.Context) error {
 		return err
 	}
 	r.notify(r.job.UserKey, r.job.ID)
+	if err := r.downloadToScratch(ctx); err != nil {
+		return err
+	}
+	if err := db.SetJobStatus(r.db, r.job.ID, db.StatusStaged); err != nil {
+		return err
+	}
+	r.notify(r.job.UserKey, r.job.ID)
+	slog.Info("job staged", "id", r.job.ID)
+	return nil
+}
 
+// downloadToScratch performs the actual HTTP download. Must be called with the
+// semaphore already held (either by acquire or by acquireGDrive).
+// It does NOT transition the job status — callers do that.
+func (r *runner) downloadToScratch(ctx context.Context) error {
 	jobDir := filepath.Join(r.cfg.ScratchDir, r.job.ID)
 	if err := os.MkdirAll(jobDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir scratch: %w", err)
@@ -160,17 +185,19 @@ func (r *runner) acquire(ctx context.Context) error {
 	}
 	size := info.Size()
 	r.job.Size = &size
-
-	if err := db.SetJobStatus(r.db, r.job.ID, db.StatusStaged); err != nil {
-		return err
-	}
-	r.notify(r.job.UserKey, r.job.ID)
-	slog.Info("job staged", "id", r.job.ID, "size", info.Size())
 	return nil
+
 }
 
 // deliver chunks and uploads the staged file to Nextcloud.
 func (r *runner) deliver(ctx context.Context) error {
+	// For gdrive-staged jobs that have no scratch file yet, restore from GDrive first.
+	if r.job.Stage == "gdrive" && r.job.ScratchPath == "" {
+		if err := r.restoreFromGDrive(ctx); err != nil {
+			return fmt.Errorf("restore from GDrive: %w", err)
+		}
+	}
+
 	// Check if chunks are already set up (resurrection of DELIVERING job).
 	existing, err := db.GetChunks(r.db, r.job.ID)
 	if err != nil {
@@ -214,6 +241,130 @@ func (r *runner) deliver(ctx context.Context) error {
 	}
 	r.notify(r.job.UserKey, r.job.ID)
 	slog.Info("job done", "id", r.job.ID)
+	return nil
+}
+
+// acquireGDrive downloads the source file to scratch, then rclone-copies it to GDrive.
+// After the rclone copy succeeds, scratch is removed to free VPS disk space.
+func (r *runner) acquireGDrive(ctx context.Context) error {
+	select {
+	case <-r.acqSem:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { r.acqSem <- struct{}{} }()
+
+	if err := db.SetJobStatus(r.db, r.job.ID, db.StatusAcquiring); err != nil {
+		return err
+	}
+	r.notify(r.job.UserKey, r.job.ID)
+
+	// Step 1: download to VPS scratch (semaphore already held).
+	if err := r.downloadToScratch(ctx); err != nil {
+		return err
+	}
+
+	// Step 2: rclone copy scratch → GDrive.
+	// dst is the remote directory (rclone puts the file inside it preserving filename).
+	dst := r.cfg.RcloneRemote // e.g. "gdrive:zerorated"
+	gdrivePath := dst + "/" + filepath.Base(r.job.ScratchPath)
+
+	slog.Info("rclone upload start", "id", r.job.ID, "dst", gdrivePath)
+
+	// Track progress: rclone reports absolute transferred bytes.
+	var lastBytes int64
+	err := gdrive.Copy(ctx, r.job.ScratchPath, dst, func(transferred int64) {
+		delta := transferred - lastBytes
+		if delta > 0 {
+			db.AddJobAcquiredBytes(r.db, r.job.ID, delta) //nolint:errcheck
+			lastBytes = transferred
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("rclone copy: %w", err)
+	}
+
+	if err := db.SetJobGdrivePath(r.db, r.job.ID, gdrivePath); err != nil {
+		return err
+	}
+	r.job.GdrivePath = gdrivePath
+
+	// Remove scratch file now that it's safely in GDrive.
+	os.RemoveAll(filepath.Dir(r.job.ScratchPath))
+	r.job.ScratchPath = ""
+
+	if err := db.SetJobStatus(r.db, r.job.ID, db.StatusStaged); err != nil {
+		return err
+	}
+	r.notify(r.job.UserKey, r.job.ID)
+	slog.Info("job staged in gdrive", "id", r.job.ID, "path", gdrivePath)
+	return nil
+}
+
+// restoreFromGDrive copies the file from GDrive back to VPS scratch so deliver() can chunk it.
+func (r *runner) restoreFromGDrive(ctx context.Context) error {
+	if r.job.GdrivePath == "" {
+		return errors.New("gdrive_path is empty — cannot restore")
+	}
+
+	jobDir := filepath.Join(r.cfg.ScratchDir, r.job.ID)
+	if err := os.MkdirAll(jobDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir scratch: %w", err)
+	}
+
+	// rclone copy <remote>/<file> <local-dir>
+	// We pass the full remote path; rclone copies the file into jobDir.
+	slog.Info("rclone restore start", "id", r.job.ID, "src", r.job.GdrivePath)
+	if err := gdrive.Copy(ctx, r.job.GdrivePath, jobDir, nil); err != nil {
+		return fmt.Errorf("rclone restore: %w", err)
+	}
+
+	scratchPath := filepath.Join(jobDir, filepath.Base(r.job.GdrivePath))
+	if err := db.SetJobScratchPath(r.db, r.job.ID, scratchPath); err != nil {
+		return err
+	}
+	r.job.ScratchPath = scratchPath
+	slog.Info("job restored from gdrive", "id", r.job.ID, "scratch", scratchPath)
+	return nil
+}
+
+// MoveToGDrive moves a STAGED vps-tier job's scratch file into GDrive.
+// It is called from the move-to-gdrive API handler.
+func (r *runner) MoveToGDrive(ctx context.Context) error {
+	if r.job.Stage != "vps" {
+		return errors.New("only vps-staged jobs can be moved to gdrive")
+	}
+	if r.job.ScratchPath == "" {
+		return errors.New("job has no scratch file")
+	}
+
+	dst := r.cfg.RcloneRemote
+	gdrivePath := dst + "/" + filepath.Base(r.job.ScratchPath)
+	slog.Info("rclone move start", "id", r.job.ID, "dst", gdrivePath)
+
+	var lastBytes int64
+	if err := gdrive.Copy(ctx, r.job.ScratchPath, dst, func(transferred int64) {
+		delta := transferred - lastBytes
+		if delta > 0 {
+			db.AddJobAcquiredBytes(r.db, r.job.ID, delta) //nolint:errcheck
+			lastBytes = transferred
+		}
+	}); err != nil {
+		return fmt.Errorf("rclone copy: %w", err)
+	}
+
+	if err := db.SetJobGdrivePath(r.db, r.job.ID, gdrivePath); err != nil {
+		return err
+	}
+
+	os.RemoveAll(filepath.Dir(r.job.ScratchPath))
+
+	// Update stage to gdrive in DB so deliver() knows where to restore from.
+	r.db.Exec(`UPDATE jobs SET stage='gdrive', scratch_path=NULL, updated_at=? WHERE id=?`, //nolint:errcheck
+		time.Now().Unix(), r.job.ID)
+
+	r.notify(r.job.UserKey, r.job.ID)
+	slog.Info("vps job moved to gdrive", "id", r.job.ID, "path", gdrivePath)
 	return nil
 }
 

@@ -159,6 +159,12 @@ func SetJobScratchPath(db *sql.DB, id, path string) error {
 	return err
 }
 
+func SetJobGdrivePath(db *sql.DB, id, path string) error {
+	_, err := db.Exec(`UPDATE jobs SET gdrive_path=?, updated_at=? WHERE id=?`,
+		path, time.Now().Unix(), id)
+	return err
+}
+
 func AddJobAcquiredBytes(db *sql.DB, id string, delta int64) error {
 	_, err := db.Exec(`UPDATE jobs SET acquired_bytes=acquired_bytes+?, updated_at=? WHERE id=?`,
 		delta, time.Now().Unix(), id)

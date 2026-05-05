@@ -23,6 +23,7 @@ function saveSettings() {
     apiKey:     document.getElementById('s-apikey').value,
     ncURL:      document.getElementById('s-ncurl').value.replace(/\/$/, ''),
     ncToken:    document.getElementById('s-nctoken').value,
+    isOwner:    document.getElementById('s-owner').checked,
   };
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
   toast('Settings saved.');
@@ -36,6 +37,7 @@ function loadSettingsForm() {
   document.getElementById('s-apikey').value  = s.apiKey    || '';
   document.getElementById('s-ncurl').value   = s.ncURL     || '';
   document.getElementById('s-nctoken').value = s.ncToken   || '';
+  document.getElementById('s-owner').checked = !!s.isOwner;
 }
 
 // ── API helpers ───────────────────────────────────────────────────────────────
@@ -175,10 +177,21 @@ function renderJobCard(job) {
   if (job.status === 'DELIVERING' && job.current_chunk) {
     body = renderChunkAction(job);
   } else if (job.status === 'STAGED' && !job.deliver_now) {
+    const s = getSettings();
+    const moveBtn = (s.isOwner && job.stage === 'vps')
+      ? `<button class="btn btn-ghost btn-sm" onclick="moveToGdrive('${esc(job.id)}')">☁ Move to GDrive</button>`
+      : '';
     body = `<div class="chunk-action">
       <span class="chunk-label">File staged on server, awaiting delivery.</span>
       <button class="btn btn-primary btn-sm" onclick="startDeliver('${esc(job.id)}')">Start delivery</button>
+      ${moveBtn}
     </div>`;
+  } else if (job.status === 'STAGED' && job.stage === 'gdrive') {
+    const s = getSettings();
+    const deliverBtn = s.isOwner
+      ? `<button class="btn btn-primary btn-sm" onclick="startDeliver('${esc(job.id)}')">Deliver from GDrive</button>`
+      : `<span class="chunk-label">Archived to GDrive. Owner must start delivery.</span>`;
+    body = `<div class="chunk-action">${deliverBtn}</div>`;
   } else if (job.status === 'DONE') {
     body = renderDone(job);
   } else if (job.status === 'FAILED') {
@@ -330,6 +343,17 @@ async function startDeliver(jobId) {
   try {
     const resp = await apiFetch(`/api/jobs/${jobId}/deliver`, { method: 'POST' });
     if (!resp.ok) { const t = await resp.text(); toast(`Deliver failed: ${t}`, true); }
+  } catch (e) {
+    toast(`Error: ${e.message}`, true);
+  }
+}
+
+async function moveToGdrive(jobId) {
+  if (!confirm('Move this staged file to Google Drive? The VPS scratch copy will be deleted.')) return;
+  try {
+    const resp = await apiFetch(`/api/jobs/${jobId}/move-to-gdrive`, { method: 'POST' });
+    if (!resp.ok) { const t = await resp.text(); toast(`Move failed: ${t}`, true); return; }
+    toast('Moving to GDrive…');
   } catch (e) {
     toast(`Error: ${e.message}`, true);
   }

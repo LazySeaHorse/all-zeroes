@@ -99,6 +99,27 @@ func (m *Manager) StartDeliver(j *db.Job) {
 	m.launch(j)
 }
 
+// MoveToGDrive moves a STAGED vps job to GDrive in a background goroutine.
+// Returns immediately; the operation runs asynchronously.
+func (m *Manager) MoveToGDrive(j *db.Job) {
+	go func() {
+		r := &runner{
+			db:     m.db,
+			cfg:    m.cfg,
+			job:    j,
+			ackCh:  make(chan int, 1),
+			acqSem: m.acqSem,
+			notify: m.OnUpdate,
+			userMu: m.userMutex(j.UserKey),
+		}
+		if err := r.MoveToGDrive(context.Background()); err != nil {
+			slog.Error("move-to-gdrive failed", "id", j.ID, "err", err)
+			db.SetJobFailed(m.db, j.ID, err.Error()) //nolint:errcheck
+			m.OnUpdate(j.UserKey, j.ID)
+		}
+	}()
+}
+
 func (m *Manager) launch(j *db.Job) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.cancels.Store(j.ID, cancel)
