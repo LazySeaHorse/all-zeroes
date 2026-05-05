@@ -423,11 +423,6 @@ func (r *runner) setupDelivery(ctx context.Context) ([]db.Chunk, error) {
 		}
 	}
 
-	if err := withRetry(ctx, func() error {
-		return nextcloud.Mkdir(ctx, r.ncURL(""), r.job.NextcloudToken)
-	}); err != nil {
-		return nil, fmt.Errorf("NC mkdir: %w", err)
-	}
 
 	manifest := buildManifest(r.job.ID, r.job.Filename, fileSize, chunks)
 	data, _ := json.Marshal(manifest)
@@ -539,10 +534,7 @@ func (r *runner) uploadChunkOnce(ctx context.Context, chunk *db.Chunk, chunkURL 
 
 func (r *runner) ncURL(path string) string {
 	base := strings.TrimRight(r.job.NextcloudURL, "/")
-	if path == "" {
-		return base + "/" + r.job.ID + "/"
-	}
-	return base + "/" + r.job.ID + "/" + path
+	return base + "/" + r.job.ID + "_" + path
 }
 
 func (r *runner) ncChunkURL(idx int) string {
