@@ -31,20 +31,21 @@ SQLite open + schema migration. **Single writer** (`SetMaxOpenConns(1)`) to avoi
 All job/chunk queries and the status string constants (`StatusQueued`, `StatusAcquiring`, `StatusStaged`, `StatusDelivering`, `StatusDone`, `StatusFailed`, `StatusCanceled` — chunk states `pending`/`uploading`/`uploaded`/`acked`). Note `SetJobFailed`/`SetJobDone`/`SetJobCanceled` all clear `nextcloud_token` (blast-radius reduction on terminal).
 
 ### [backend/internal/api/router.go](backend/internal/api/router.go)
-chi router. Middleware order: Logger → Recoverer → CORS → (per `/api`) auth. CORS supports the literal `http://localhost:*` for any localhost port plus exact-match origins from a comma-separated env list.
+chi router. Middleware order: Logger → Recoverer → CORS → (per `/api`) auth. CORS supports the literal `http://localhost:*` for any localhost port plus exact-match origins from a comma-separated env list. `NewRouter` takes a `scratchDir string` parameter (passed from `main.go`) so `/healthz` can report disk stats.
 
 ### [backend/internal/api/middleware.go](backend/internal/api/middleware.go)
 Bearer-token auth — looks up `users.api_key` in SQLite, stashes the user in request context. `currentUser(r)` retrieves it.
 
 ### [backend/internal/api/handlers.go](backend/internal/api/handlers.go)
-Just `/healthz`.
+`healthz(scratchDir)` — returns `{status, scratch_free_bytes, scratch_total_bytes}`. Calls `scratchDiskStats` which is build-tag split: `diskstat_unix.go` (`!windows`) uses `syscall.Statfs`; `diskstat_windows.go` returns zeros so dev builds on Windows compile cleanly.
 
 ### [backend/internal/api/jobs.go](backend/internal/api/jobs.go)
-All `/api/jobs*` handlers. Notes:
+All `/api/jobs*` handlers plus `GET /api/probe`. Notes:
 - `submitHandler` does the HEAD-for-Range check **synchronously** when `stage=stream` so it can reject with a useful 400 before creating the job; size is captured here and stored on creation.
 - For `stage=gdrive`, requires `is_owner`.
 - `jobManager` is an interface (not the concrete `*jobs.Manager`) — the API layer only sees `Start/AckChunk/Cancel/StartDeliver/MoveToGDrive`. Keeps tests simple.
 - `jobToResponse` builds a `current_chunk.url` for the PWA via `jobs.ChunkURL` — the same helper the runner uses to PUT the chunk. Single source of truth; don't reintroduce a parallel formatter.
+- `probeHandler` / `probeURL`: HEAD-probes an arbitrary URL and returns `{size, filename, content_type, accept_ranges}`. Uses the existing `headClient` (30 s timeout). Non-200 responses return a soft `{error: "..."}` JSON rather than a 4xx so the PWA can display the warning without blocking submit. Content-Disposition filename parsed via `mime.ParseMediaType`; falls back to `jobs.FilenameFromURL`.
 - The response also exposes `referer` and `user_agent` (parsed out of `headers_json`) so the PWA can resubmit a job with the same params on retry without a dedicated server-side clone endpoint.
 - `DELETE /api/jobs/{id}` calls `mgr.Purge` (full removal: cancel goroutine if alive, remove scratch dir, drop the row). Works on any state, including terminal — that's how the PWA "delete from list" button cleans up DONE/FAILED/CANCELED jobs.
 
@@ -100,17 +101,26 @@ Format reference for `USERS_FILE`. Real one lives at `/etc/zerorated/users.json`
 ## PWA — file by file
 
 ### [pwa/index.html](pwa/index.html)
-Single-page shell. Inline CSS (light/dark theme via `data-theme` attribute, var-based), header with settings + theme + SSE-status dot, FAB to open a "new job" modal, and a "settings" modal. Uses Poppins from Google Fonts. **No JS framework** by design — vanilla only.
+Single-page shell. Inline CSS (light/dark/auto theme via `data-theme` attribute, var-based), header with settings + theme-cycle + disk-gauge + SSE-status dot, FAB to open a "new job" modal, and a "settings" modal. Uses Poppins from Google Fonts. **No JS framework** by design — vanilla only.
+
+Theme toggle cycles `auto → light → dark → auto`. Auto mode reads `prefers-color-scheme` on load and listens for system changes reactively. Stored value in `localStorage` is `'light'`, `'dark'`, or absent (= auto).
 
 ### [pwa/app.js](pwa/app.js)
 All client logic.
 - Settings stored in `localStorage` under `az_settings`: `backendURL`, `apiKey`, `ncURL`, `ncToken`, `isOwner`. The `isOwner` flag is purely a UI hint to show/hide the "Move to GDrive" button — server enforces actual permission.
+- Settings can be exported as a JSON file and re-imported via a file picker — useful for multi-device setup.
 - SSE: implemented via `fetch` + `ReadableStream` (not `EventSource`) so the `Authorization: Bearer` header can be set. `EventSource` doesn't support custom headers. Reconnects with exponential backoff up to 30s.
 - Chunk download: prefers `showSaveFilePicker` (Chromium) for streaming-to-disk; falls back to a buffered `Blob` + invisible `<a download>`. The blob fallback won't work for chunks bigger than browser RAM, so most users need a Chromium browser.
 - Delete button is shown on every status; calls `DELETE /api/jobs/{id}` which now does a full purge (goroutine + scratch + row) regardless of state.
 - Retry button (FAILED / CANCELED) reads `url`/`filename`/`referer`/`user_agent`/`stage`/`deliver_now` from the response, combines with current Nextcloud creds from `localStorage`, POSTs `/api/jobs`, then deletes the old row. Implementation choice: retry creates a **new** job rather than mutating the dead one — avoids reasoning about orphaned chunks, partial scratch, and the cleared `nextcloud_token` on terminal jobs.
 - `buildConcatCmd` detects Windows via `navigator.userAgent` and emits `copy /b` instead of `cat`.
 - `esc()` is the only HTML-escape utility — used everywhere user-controlled strings (filename, error, chunk URL, sha) are interpolated into HTML.
+- **Job list split**: active jobs (QUEUED/ACQUIRING/STAGED/DELIVERING) render at the top; terminal jobs (DONE/FAILED/CANCELED) collapse into an "Archive (N)" section. Collapsed state persists in `localStorage` under `az_archive_open`.
+- **Rate tracking**: `state.rates[jobId]` holds EWMA speed for ACQUIRING jobs. Updated on every SSE tick; cleared on terminal status. Displayed as `5.2 MB/s · 3m left` in the meta line.
+- **NC folder link**: each card has a `↗` button opening `<nc-host>/s/<token>` (derived from `ncURL` + `ncToken` settings; strips `/public.php` suffix for subpath installs). `ncFolderURL()` is the single source — don't rebuild inline.
+- **Probe**: URL field fires `GET /api/probe?url=...` (500 ms debounce) on input. Shows size / content-type / streaming support below the field; auto-fills filename if blank.
+- **Disk gauge**: polls `GET /healthz` every 30 s; shows "X GB free" in the header. Highlighted red below 5 GB. Loop starts unconditionally at boot — `updateDiskGauge` returns early if `backendURL` not set.
+- **Keyboard shortcuts**: `n` opens the submit modal; `Esc` closes any open modal. Paste a URL outside an input to open the modal pre-filled (fires probe automatically).
 
 ### [pwa/sw.js](pwa/sw.js)
 Service worker for installability only. Caches the static shell (`/`, `index.html`, `app.js`, `icon.svg`, `manifest.json`); never caches API responses (intentional — always fetch live).

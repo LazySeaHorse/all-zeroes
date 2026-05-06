@@ -70,7 +70,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	router := api.NewRouter(database, mgr, br, allowedOrigins)
+	router := api.NewRouter(database, mgr, br, allowedOrigins, scratchDir)
 
 	srv := &http.Server{
 		Addr:        listenAddr,

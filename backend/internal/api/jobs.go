@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -334,6 +336,81 @@ func checkRangeSupport(ctx context.Context, rawURL, referer, userAgent string) (
 		return 0, errors.New("source did not return Content-Length; use stage=vps")
 	}
 	return resp.ContentLength, nil
+}
+
+// probeResponse is the JSON shape returned by GET /api/probe.
+type probeResponse struct {
+	URL          string `json:"url"`
+	Size         *int64 `json:"size,omitempty"`
+	Filename     string `json:"filename,omitempty"`
+	ContentType  string `json:"content_type,omitempty"`
+	AcceptRanges bool   `json:"accept_ranges"`
+	Error        string `json:"error,omitempty"`
+}
+
+func probeHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		rawURL := r.URL.Query().Get("url")
+		if rawURL == "" {
+			http.Error(w, "url query param required", http.StatusBadRequest)
+			return
+		}
+		result := probeURL(r.Context(), rawURL,
+			r.URL.Query().Get("referer"),
+			r.URL.Query().Get("user_agent"),
+		)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(result) //nolint:errcheck
+	}
+}
+
+func probeURL(ctx context.Context, rawURL, referer, userAgent string) probeResponse {
+	result := probeResponse{URL: rawURL}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, rawURL, nil)
+	if err != nil {
+		result.Error = "invalid URL"
+		return result
+	}
+	if referer != "" {
+		req.Header.Set("Referer", referer)
+	}
+	if userAgent != "" {
+		req.Header.Set("User-Agent", userAgent)
+	}
+
+	resp, err := headClient.Do(req)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		result.Error = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		return result
+	}
+
+	result.AcceptRanges = resp.Header.Get("Accept-Ranges") == "bytes"
+	result.ContentType = resp.Header.Get("Content-Type")
+
+	if resp.ContentLength > 0 {
+		n := resp.ContentLength
+		result.Size = &n
+	}
+
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+		if _, params, err := mime.ParseMediaType(cd); err == nil {
+			if name := params["filename"]; name != "" {
+				result.Filename = strings.TrimSpace(name)
+			}
+		}
+	}
+	if result.Filename == "" {
+		result.Filename = jobs.FilenameFromURL(rawURL)
+	}
+
+	return result
 }
 
 // jobToResponse converts a Job and its chunks to the response shape.

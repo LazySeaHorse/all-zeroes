@@ -4,6 +4,7 @@
 
 const state = {
   jobs: {},        // id → job object (latest from SSE)
+  rates: {},       // id → { lastBytes, lastTime, ewmaRate } for ACQUIRING ETA
   sseStatus: 'connecting',
   sseAbort: null,
 };
@@ -37,6 +38,37 @@ function loadSettingsForm() {
   document.getElementById('s-ncurl').value = s.ncURL || '';
   document.getElementById('s-nctoken').value = s.ncToken || '';
   document.getElementById('s-owner').checked = !!s.isOwner;
+}
+
+function exportSettings() {
+  const s = getSettings();
+  const blob = new Blob([JSON.stringify(s, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'az-settings.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  toast('Settings exported.');
+}
+
+function importSettingsFile(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const s = JSON.parse(e.target.result);
+      if (typeof s !== 'object' || s === null) throw new Error();
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+      loadSettingsForm();
+      toast('Settings imported.');
+      reconnectSSE();
+    } catch {
+      toast('Invalid settings file.', true);
+    }
+    event.target.value = '';
+  };
+  reader.readAsText(file);
 }
 
 // ── API helpers ───────────────────────────────────────────────────────────────
@@ -110,7 +142,9 @@ async function runSSE() {
 }
 
 function onJobUpdate(job) {
+  const prev = state.jobs[job.id];
   state.jobs[job.id] = job;
+  updateRate(prev, job);
   renderJobsView();
 }
 
@@ -120,6 +154,46 @@ function setSSEStatus(status, retries) {
   dot.className = status;
   const retryStr = retries ? ` (retry #${retries})` : '';
   dot.title = `SSE: ${status}${retryStr}`;
+}
+
+// ── Rate tracking (ETA / speed for ACQUIRING) ─────────────────────────────────
+
+function updateRate(prev, job) {
+  if (job.status !== 'ACQUIRING') {
+    delete state.rates[job.id];
+    return;
+  }
+  if (!job.size || job.acquired_bytes == null) return;
+
+  const now = Date.now();
+  const r = state.rates[job.id];
+
+  if (!r) {
+    state.rates[job.id] = { lastBytes: job.acquired_bytes, lastTime: now, ewmaRate: 0 };
+    return;
+  }
+
+  const deltaBytes = job.acquired_bytes - r.lastBytes;
+  const deltaSec = (now - r.lastTime) / 1000;
+  if (deltaSec < 0.5 || deltaBytes < 0) return;
+
+  const instantRate = deltaBytes / deltaSec;
+  const alpha = 0.3;
+  const ewmaRate = r.ewmaRate === 0 ? instantRate : alpha * instantRate + (1 - alpha) * r.ewmaRate;
+  state.rates[job.id] = { lastBytes: job.acquired_bytes, lastTime: now, ewmaRate };
+}
+
+function fmtRate(bytesPerSec) {
+  if (!bytesPerSec || bytesPerSec <= 0) return null;
+  return fmtSize(bytesPerSec) + '/s';
+}
+
+function fmtETA(remainingBytes, bytesPerSec) {
+  if (!bytesPerSec || bytesPerSec <= 0 || remainingBytes <= 0) return null;
+  const secs = Math.round(remainingBytes / bytesPerSec);
+  if (secs < 60) return `${secs}s left`;
+  if (secs < 3600) return `${Math.round(secs / 60)}m left`;
+  return `${Math.floor(secs / 3600)}h ${Math.round((secs % 3600) / 60)}m left`;
 }
 
 // ── Modals ────────────────────────────────────────────────────────────────────
@@ -138,24 +212,146 @@ function openModal(name) {
 function closeModal(event, name) {
   if (event) event.stopPropagation();
   document.getElementById(`modal-${name}`).classList.remove('open');
+  if (name === 'submit') {
+    clearTimeout(probeTimer);
+    const el = document.getElementById('probe-result');
+    if (el) el.style.display = 'none';
+  }
+}
+
+// ── Disk gauge ────────────────────────────────────────────────────────────────
+
+async function updateDiskGauge() {
+  const { backendURL } = getSettings();
+  if (!backendURL) return;
+  try {
+    const resp = await fetch(`${backendURL}/healthz`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const el = document.getElementById('disk-gauge');
+    if (!el) return;
+    const free = data.scratch_free_bytes;
+    const total = data.scratch_total_bytes;
+    if (!free && !total) { el.textContent = ''; return; }
+    el.textContent = `${fmtSize(free)} free`;
+    el.className = 'disk-gauge' + (free < 5 * 1024 * 1024 * 1024 ? ' low' : '');
+  } catch { /* silently ignore */ }
+}
+
+async function diskGaugeLoop() {
+  while (true) {
+    await updateDiskGauge();
+    await sleep(30000);
+  }
+}
+
+// ── URL probe ─────────────────────────────────────────────────────────────────
+
+let probeTimer = null;
+function probeURLDebounced() {
+  clearTimeout(probeTimer);
+  probeTimer = setTimeout(doProbe, 500);
+}
+
+async function doProbe() {
+  const urlVal = document.getElementById('f-url').value.trim();
+  const resultEl = document.getElementById('probe-result');
+  if (!resultEl) return;
+  if (!urlVal.startsWith('http')) { resultEl.style.display = 'none'; return; }
+
+  const { backendURL, apiKey } = getSettings();
+  if (!backendURL || !apiKey) return;
+
+  try {
+    const resp = await apiFetch(`/api/probe?url=${encodeURIComponent(urlVal)}`);
+    if (!resp.ok) { resultEl.style.display = 'none'; return; }
+    const data = await resp.json();
+
+    if (data.error) {
+      resultEl.textContent = `⚠ ${data.error}`;
+      resultEl.style.display = 'block';
+      return;
+    }
+
+    const parts = [];
+    if (data.size != null) parts.push(fmtSize(data.size));
+    if (data.content_type) parts.push(data.content_type.split(';')[0].trim());
+    if (data.accept_ranges) parts.push('streaming ✓');
+
+    if (data.filename) {
+      const fnField = document.getElementById('f-filename');
+      if (fnField && !fnField.value) fnField.value = data.filename;
+    }
+
+    resultEl.textContent = parts.join(' · ');
+    resultEl.style.display = parts.length ? 'block' : 'none';
+  } catch {
+    resultEl.style.display = 'none';
+  }
 }
 
 // ── Views ─────────────────────────────────────────────────────────────────────
 
+const TERMINAL_STATUSES = new Set(['DONE', 'FAILED', 'CANCELED']);
+
 function renderJobsView() {
   const container = document.getElementById('jobs-list');
-  const jobs = Object.values(state.jobs).sort(
+  const allJobs = Object.values(state.jobs).sort(
     (a, b) => new Date(b.created_at) - new Date(a.created_at)
   );
 
-  if (jobs.length === 0) {
+  const active = allJobs.filter(j => !TERMINAL_STATUSES.has(j.status));
+  const archived = allJobs.filter(j => TERMINAL_STATUSES.has(j.status));
+
+  if (active.length === 0 && archived.length === 0) {
     const msg = state.sseStatus === 'connected'
       ? '<p>No jobs yet. Click the + button to submit one.</p>'
       : '<p>Connecting…</p>';
     container.innerHTML = `<div class="empty-state">${msg}</div>`;
     return;
   }
-  container.innerHTML = jobs.map(renderJobCard).join('');
+
+  let html = '';
+
+  if (active.length > 0) {
+    html += active.map(renderJobCard).join('');
+  } else if (state.sseStatus === 'connected') {
+    html += '<div class="empty-state" style="padding:40px 20px"><p>No active jobs. Click + to start one.</p></div>';
+  }
+
+  if (archived.length > 0) {
+    const isOpen = localStorage.getItem('az_archive_open') !== 'false';
+    html += `
+      <div class="archive-header" onclick="toggleArchive()">
+        <span>Archive (${archived.length})</span>
+        <span class="archive-chevron">${isOpen ? '▲' : '▼'}</span>
+      </div>
+      <div id="archive-section"${isOpen ? '' : ' style="display:none"'}>
+        ${archived.map(renderJobCard).join('')}
+      </div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function toggleArchive() {
+  const section = document.getElementById('archive-section');
+  if (!section) return;
+  const isOpen = section.style.display !== 'none';
+  section.style.display = isOpen ? 'none' : '';
+  const chevron = document.querySelector('.archive-chevron');
+  if (chevron) chevron.textContent = isOpen ? '▼' : '▲';
+  localStorage.setItem('az_archive_open', String(!isOpen));
+}
+
+function ncFolderURL() {
+  const { ncURL, ncToken } = getSettings();
+  if (!ncURL || !ncToken) return null;
+  try {
+    const publicPhp = ncURL.indexOf('/public.php');
+    const base = publicPhp >= 0 ? ncURL.slice(0, publicPhp) : new URL(ncURL).origin;
+    return `${base}/s/${ncToken}`;
+  } catch { return null; }
 }
 
 function renderJobCard(job) {
@@ -164,10 +360,18 @@ function renderJobCard(job) {
   const progress = job.chunks_total > 0
     ? `Chunk ${job.chunks_done} / ${job.chunks_total}`
     : '';
-  const acquireProgress = job.status === 'ACQUIRING' && job.size
-    ? `${fmtSize(job.acquired_bytes)} / ${size}`
-    : '';
-  const meta = [size, job.stage, progress || acquireProgress].filter(Boolean).join(' · ');
+
+  let acquireDetail = '';
+  if (job.status === 'ACQUIRING' && job.size) {
+    const r = state.rates[job.id];
+    const rate = r ? fmtRate(r.ewmaRate) : null;
+    const eta = (r && r.ewmaRate > 0) ? fmtETA(job.size - job.acquired_bytes, r.ewmaRate) : null;
+    acquireDetail = `${fmtSize(job.acquired_bytes)} / ${size}`;
+    if (rate) acquireDetail += ` · ${rate}`;
+    if (eta) acquireDetail += ` · ${eta}`;
+  }
+
+  const meta = [size, job.stage, progress || acquireDetail].filter(Boolean).join(' · ');
 
   let progressBar = '';
   if (job.status === 'ACQUIRING' && job.size) {
@@ -214,16 +418,20 @@ function renderJobCard(job) {
       </div>`;
   }
 
-  const deleteTitle = ['DONE', 'FAILED', 'CANCELED'].includes(job.status)
-    ? 'Delete from list'
-    : 'Cancel and delete';
+  const deleteTitle = TERMINAL_STATUSES.has(job.status) ? 'Delete from list' : 'Cancel and delete';
   const deleteBtn = `<button class="btn btn-ghost btn-sm" onclick="deleteJob('${esc(job.id)}')" title="${deleteTitle}">✕</button>`;
+
+  const folderHref = ncFolderURL();
+  const folderBtn = folderHref
+    ? `<a class="btn btn-ghost btn-sm" href="${esc(folderHref)}" target="_blank" rel="noopener" title="Browse Nextcloud folder">↗</a>`
+    : '';
 
   return `
     <div class="job-card status-${statusLow}">
       <div class="job-header">
         <span class="job-filename" title="${esc(job.filename)}">${esc(job.filename)}</span>
         <span class="badge ${statusLow}">${job.status}</span>
+        ${folderBtn}
         ${deleteBtn}
       </div>
       <div class="job-meta">${esc(meta)}</div>
@@ -386,7 +594,7 @@ async function moveToGdrive(jobId) {
 
 async function deleteJob(jobId) {
   const job = state.jobs[jobId];
-  const isTerminal = job && ['DONE', 'FAILED', 'CANCELED'].includes(job.status);
+  const isTerminal = job && TERMINAL_STATUSES.has(job.status);
   const prompt = isTerminal
     ? 'Delete this job from the list? Any scratch file on the VPS will be removed.'
     : 'Cancel and delete this job? The goroutine will stop and the scratch file will be deleted.';
@@ -463,7 +671,7 @@ function fmtSize(bytes) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
   let n = bytes, i = 0;
   while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-  return (i > 0 ? n.toFixed(1) : Math.round(n)) + ' ' + units[i];
+  return (i > 0 ? n.toFixed(1) : Math.round(n)) + ' ' + units[i];
 }
 
 function esc(str) {
@@ -487,8 +695,10 @@ function toast(msg, isError = false) {
 
 function init() {
   const s = getSettings();
-  renderJobsView(); // Start by rendering jobs view unconditionally
-  
+  renderJobsView();
+
+  diskGaugeLoop();
+
   if (!s.backendURL || !s.apiKey) {
     openModal('settings');
     toast('Configure your backend URL and API key to get started.');
@@ -499,6 +709,32 @@ function init() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(console.warn);
   }
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', e => {
+    // Don't intercept when typing in an input or textarea
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+    if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      openModal('submit');
+    }
+    if (e.key === 'Escape') {
+      ['submit', 'settings'].forEach(name => closeModal(null, name));
+    }
+  });
+
+  // Paste-to-submit: paste a URL anywhere outside inputs to open the submit modal
+  document.addEventListener('paste', e => {
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const text = (e.clipboardData || window.clipboardData).getData('text/plain').trim();
+    if (text.startsWith('http://') || text.startsWith('https://')) {
+      openModal('submit');
+      const urlField = document.getElementById('f-url');
+      urlField.value = text;
+      probeURLDebounced();
+    }
+  });
 }
 
 document.addEventListener('DOMContentLoaded', init);

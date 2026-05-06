@@ -267,6 +267,31 @@ main {
 }
 .empty-state p { margin-bottom: 16px; font-size: 15px; }
 
+/* Archive section */
+.archive-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  margin: 8px 0 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  user-select: none;
+}
+.archive-header:hover { color: var(--text); }
+.archive-chevron { font-size: 10px; }
+
+/* Disk gauge */
+.disk-gauge {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.disk-gauge.low { color: var(--text); font-weight: 600; }
+
 /* ── FAB ── */
 .fab {
   position: fixed;
@@ -439,6 +464,7 @@ select option { background: var(--bg); color: var(--text); }
         <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
       </svg>
     </button>
+    <span id="disk-gauge" class="disk-gauge"></span>
     <div id="sse-dot" title="SSE connection status"></div>
   </div>
 </header>
@@ -463,7 +489,8 @@ select option { background: var(--bg); color: var(--text); }
     <div class="form-section" style="margin-bottom: 0; max-width: none;">
       <h2>New Download Job</h2>
       <label for="f-url">URL *</label>
-      <input id="f-url" type="url" placeholder="https://example.com/file.zip" autocomplete="off">
+      <input id="f-url" type="url" placeholder="https://example.com/file.zip" autocomplete="off" oninput="probeURLDebounced()">
+      <div id="probe-result" class="hint" style="display:none;margin-top:-12px;margin-bottom:16px;"></div>
 
       <label for="f-filename">Filename Override</label>
       <input id="f-filename" type="text" placeholder="Leave blank to auto-detect">
@@ -518,6 +545,13 @@ select option { background: var(--bg); color: var(--text); }
       </div>
 
       <button class="btn btn-primary" style="width: 100%" onclick="saveSettings()">Save Settings</button>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button class="btn btn-ghost" style="flex:1" onclick="exportSettings()">Export JSON</button>
+        <label class="btn btn-ghost" style="flex:1;cursor:pointer">
+          Import JSON
+          <input type="file" id="s-import-file" accept=".json,application/json,text/plain" style="display:none" onchange="importSettingsFile(event)">
+        </label>
+      </div>
     </div>
   </div>
 </div>
@@ -525,36 +559,36 @@ select option { background: var(--bg); color: var(--text); }
 <div id="toast"></div>
 
 <script>
-  // Theme toggle logic
-  function setTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem('theme', theme);
-    document.getElementById('meta-theme-color').setAttribute('content', theme === 'dark' ? '#000000' : '#ffffff');
-    
-    // Update icon
+  const SUN_ICON = '<circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>';
+  const MOON_ICON = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>';
+  const AUTO_ICON = '<rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line>';
+
+  function setTheme(stored) {
+    // stored is 'light', 'dark', or null/'auto' (follow system)
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const resolved = (stored === 'light' || stored === 'dark') ? stored : (prefersDark ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', resolved);
+    document.getElementById('meta-theme-color').setAttribute('content', resolved === 'dark' ? '#000000' : '#ffffff');
     const icon = document.getElementById('theme-icon');
-    if (theme === 'dark') {
-      icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>';
-    } else {
-      icon.innerHTML = '<circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>';
-    }
+    if (stored === 'light') icon.innerHTML = SUN_ICON;
+    else if (stored === 'dark') icon.innerHTML = MOON_ICON;
+    else icon.innerHTML = AUTO_ICON;
+    document.getElementById('theme-toggle').title = stored === 'light' ? 'Theme: light' : stored === 'dark' ? 'Theme: dark' : 'Theme: auto (system)';
   }
 
   function toggleTheme() {
-    const currentTheme = document.documentElement.getAttribute('data-theme');
-    setTheme(currentTheme === 'dark' ? 'light' : 'dark');
+    const stored = localStorage.getItem('theme'); // null | 'light' | 'dark'
+    const next = stored === null ? 'light' : stored === 'light' ? 'dark' : null;
+    if (next === null) localStorage.removeItem('theme'); else localStorage.setItem('theme', next);
+    setTheme(next);
   }
 
-  // Initialize theme
-  const savedTheme = localStorage.getItem('theme');
-  const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  if (savedTheme) {
-    setTheme(savedTheme);
-  } else if (prefersDark) {
-    setTheme('dark');
-  } else {
-    setTheme('light');
-  }
+  // React to system preference changes when in auto mode
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (!localStorage.getItem('theme')) setTheme(null);
+  });
+
+  setTheme(localStorage.getItem('theme'));
 </script>
 <script src="app.js"></script>
 </body>
