@@ -137,7 +137,9 @@ PWA metadata + a single SVG icon (no PNG fallbacks).
 
 Separate Go module (`allzeroes/tgbot`) so the telegram library doesn't pollute the main server's `go.mod`. Single file: `main.go`.
 
-**Env vars required:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS` (comma-separated int64 chat IDs), `BACKEND_URL`, `BACKEND_API_KEY`, `NEXTCLOUD_URL`, `NEXTCLOUD_TOKEN`. Written to `/etc/zerorated/tgbot.env` (chmod 600) by the setup script.
+**Env vars required:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS` (comma-separated int64 chat IDs), `BACKEND_API_KEY`. `BACKEND_URL` defaults to `http://localhost:8080`. Written to `/etc/zerorated/tgbot.env` (chmod 600) by the setup script; API key is auto-read from `/etc/zerorated/users.json` — not prompted.
+
+**Nextcloud credentials** are not env vars. They are stored in a JSON file at `NC_CONFIG_PATH` (default `/var/lib/zerorated/tgbot-nc.json`, writable by the `zerorated` user) and managed entirely via `/setnc <url> <token>` inside the bot. On submit, if the file is missing or empty, the bot replies with an error prompting the user to run `/setnc`.
 
 **State:** two in-memory maps protected by a single `sync.Mutex`:
 - `pending map[int64]*pendingSub` — one entry per chat while the user is picking options before submitting.

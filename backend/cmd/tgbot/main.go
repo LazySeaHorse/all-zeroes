@@ -23,17 +23,13 @@ type config struct {
 	allowed    map[int64]bool
 	backendURL string
 	apiKey     string
-	ncURL      string
-	ncToken    string
 }
 
 func loadConfig() config {
 	c := config{
 		token:      mustEnv("TELEGRAM_BOT_TOKEN"),
-		backendURL: strings.TrimRight(mustEnv("BACKEND_URL"), "/"),
+		backendURL: getEnvOr("BACKEND_URL", "http://localhost:8080"),
 		apiKey:     mustEnv("BACKEND_API_KEY"),
-		ncURL:      mustEnv("NEXTCLOUD_URL"),
-		ncToken:    mustEnv("NEXTCLOUD_TOKEN"),
 		allowed:    map[int64]bool{},
 	}
 	for _, s := range strings.Split(mustEnv("TELEGRAM_ALLOWED_CHAT_IDS"), ",") {
@@ -56,6 +52,38 @@ func mustEnv(k string) string {
 		log.Fatalf("required env var %s is not set", k)
 	}
 	return v
+}
+
+func getEnvOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return strings.TrimRight(v, "/")
+	}
+	return def
+}
+
+// ---- NC config (persisted to disk, editable via /setnc) --------------------
+
+type ncConfig struct {
+	URL   string `json:"url"`
+	Token string `json:"token"`
+}
+
+func loadNCConfig(path string) ncConfig {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ncConfig{}
+	}
+	var nc ncConfig
+	json.Unmarshal(data, &nc) //nolint:errcheck
+	return nc
+}
+
+func saveNCConfig(path string, nc ncConfig) error {
+	data, err := json.MarshalIndent(nc, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0600)
 }
 
 // ---- backend client --------------------------------------------------------
@@ -116,7 +144,7 @@ func (bc *backendClient) listJobs() ([]jobResp, error) {
 	return out.Jobs, json.NewDecoder(resp.Body).Decode(&out)
 }
 
-func (bc *backendClient) submitJob(url, filename, stage string, noChunk, deliverNow bool) (*jobResp, error) {
+func (bc *backendClient) submitJob(url, filename, stage string, noChunk, deliverNow bool, ncURL, ncToken string) (*jobResp, error) {
 	dn := deliverNow
 	payload := map[string]any{
 		"url":             url,
@@ -124,8 +152,8 @@ func (bc *backendClient) submitJob(url, filename, stage string, noChunk, deliver
 		"stage":           stage,
 		"no_chunk":        noChunk,
 		"deliver_now":     &dn,
-		"nextcloud_url":   bc.cfg.ncURL,
-		"nextcloud_token": bc.cfg.ncToken,
+		"nextcloud_url":   ncURL,
+		"nextcloud_token": ncToken,
 	}
 	resp, err := bc.do("POST", "/api/jobs", payload)
 	if err != nil {
@@ -196,6 +224,9 @@ type bot struct {
 	mu      sync.Mutex
 	pending map[int64]*pendingSub  // chatID → pending submission
 	tracked map[string]*trackedJob // jobID → polling state
+	ncMu    sync.RWMutex
+	nc      ncConfig
+	ncPath  string
 }
 
 // ---- keyboards -------------------------------------------------------------
@@ -289,8 +320,12 @@ func (b *bot) handleMessage(msg *tgbotapi.Message) {
 			b.cmdCancel(chatID, msg.CommandArguments())
 		case "deliver":
 			b.cmdDeliver(chatID, msg.CommandArguments())
+		case "nc":
+			b.cmdNC(chatID)
+		case "setnc":
+			b.cmdSetNC(chatID, msg.CommandArguments())
 		default:
-			b.send(chatID, "Commands: /list · /cancel <id> · /deliver <id>")
+			b.send(chatID, "Commands: /list · /cancel <id> · /deliver <id> · /nc · /setnc <url> <token>")
 		}
 		return
 	}
@@ -408,7 +443,16 @@ func (b *bot) handleOption(chatID int64, msgID int, action string) {
 func (b *bot) submitPending(chatID int64, msgID int, p *pendingSub) {
 	b.removeKB(chatID, msgID)
 
-	j, err := b.bc.submitJob(p.sourceURL, p.filename, p.stage, p.noChunk, p.deliverNow)
+	b.ncMu.RLock()
+	ncURL, ncToken := b.nc.URL, b.nc.Token
+	b.ncMu.RUnlock()
+
+	if ncURL == "" || ncToken == "" {
+		b.send(chatID, "❌ Nextcloud not configured. Set it with:\n`/setnc <url> <token>`")
+		return
+	}
+
+	j, err := b.bc.submitJob(p.sourceURL, p.filename, p.stage, p.noChunk, p.deliverNow, ncURL, ncToken)
 	if err != nil {
 		b.send(chatID, "❌ Submit failed: "+err.Error())
 		return
@@ -507,6 +551,39 @@ func (b *bot) cmdDeliver(chatID int64, args string) {
 		return
 	}
 	b.send(chatID, "🚀 Delivery started for `"+escMD(j.ID[:8])+"`")
+}
+
+func (b *bot) cmdNC(chatID int64) {
+	b.ncMu.RLock()
+	url, token := b.nc.URL, b.nc.Token
+	b.ncMu.RUnlock()
+
+	if url == "" {
+		b.send(chatID, "Nextcloud not configured. Use:\n`/setnc <url> <token>`")
+		return
+	}
+	masked := token
+	if len(token) > 4 {
+		masked = token[:4] + strings.Repeat("*", len(token)-4)
+	}
+	b.send(chatID, fmt.Sprintf("*Nextcloud*\nURL: `%s`\nToken: `%s`", escMD(url), escMD(masked)))
+}
+
+func (b *bot) cmdSetNC(chatID int64, args string) {
+	parts := strings.Fields(args)
+	if len(parts) != 2 {
+		b.send(chatID, "Usage: `/setnc <url> <token>`")
+		return
+	}
+	nc := ncConfig{URL: parts[0], Token: parts[1]}
+	if err := saveNCConfig(b.ncPath, nc); err != nil {
+		b.send(chatID, "❌ Could not save config: "+err.Error())
+		return
+	}
+	b.ncMu.Lock()
+	b.nc = nc
+	b.ncMu.Unlock()
+	b.send(chatID, "✅ Nextcloud settings saved.")
 }
 
 func (b *bot) findJob(chatID int64, prefix string) (jobResp, bool) {
@@ -696,12 +773,15 @@ func main() {
 	}
 	log.Printf("bot @%s started", api.Self.UserName)
 
+	ncPath := getEnvOr("NC_CONFIG_PATH", "/var/lib/zerorated/tgbot-nc.json")
 	b := &bot{
 		api:     api,
 		cfg:     c,
 		bc:      newBackendClient(c),
 		pending: make(map[int64]*pendingSub),
 		tracked: make(map[string]*trackedJob),
+		nc:      loadNCConfig(ncPath),
+		ncPath:  ncPath,
 	}
 
 	go b.startPolling()

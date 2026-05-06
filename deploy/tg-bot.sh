@@ -8,8 +8,7 @@ echo ""
 echo "Prerequisites: the main backend (setup.sh) must already be installed."
 echo "You will need:"
 echo " - A Telegram bot token (from @BotFather)"
-echo " - Your Telegram chat ID (send a message to @userinfobot to find it)"
-echo " - Your Nextcloud share URL and token (same as the PWA settings)"
+echo " - Your Telegram chat ID (send /start to @userinfobot to find it)"
 echo ""
 
 GH_USER="lazyseahorse"
@@ -18,18 +17,15 @@ GH_USER="lazyseahorse"
 
 read -p "Telegram bot token: " BOT_TOKEN
 read -p "Your Telegram chat ID: " CHAT_ID
-read -p "Nextcloud share URL (e.g. https://cloud.example.com/public.php/webdav): " NC_URL
-read -p "Nextcloud share token: " NC_TOKEN
 
-# Auto-detect backend API key from existing users.json
-if [ -f /etc/zerorated/users.json ]; then
-  API_KEY=$(python3 -c "import json,sys; data=json.load(open('/etc/zerorated/users.json')); print(data[0]['api_key'])" 2>/dev/null || true)
-fi
+# Auto-read API key from existing users.json
+API_KEY=$(python3 -c "import json; print(json.load(open('/etc/zerorated/users.json'))[0]['api_key'])" 2>/dev/null || true)
 if [ -z "$API_KEY" ]; then
-  read -p "Backend API key (from /etc/zerorated/users.json): " API_KEY
+  echo "ERROR: Could not read API key from /etc/zerorated/users.json."
+  echo "Make sure the main backend is installed first (setup.sh)."
+  exit 1
 fi
-
-BACKEND_URL="http://localhost:8080"
+echo "Backend API key auto-detected from users.json."
 
 echo ""
 echo "[1/3] Building the bot binary..."
@@ -48,10 +44,7 @@ echo "[2/3] Writing env file..."
 cat <<EOF | sudo tee /etc/zerorated/tgbot.env > /dev/null
 TELEGRAM_BOT_TOKEN=$BOT_TOKEN
 TELEGRAM_ALLOWED_CHAT_IDS=$CHAT_ID
-BACKEND_URL=$BACKEND_URL
 BACKEND_API_KEY=$API_KEY
-NEXTCLOUD_URL=$NC_URL
-NEXTCLOUD_TOKEN=$NC_TOKEN
 EOF
 sudo chmod 600 /etc/zerorated/tgbot.env
 sudo chown zerorated:zerorated /etc/zerorated/tgbot.env
@@ -81,8 +74,11 @@ echo "========================================="
 echo "         Telegram Bot is running!        "
 echo "========================================="
 echo ""
-echo "Send your bot a URL or a file to get started."
-echo "Commands: /list · /cancel <id> · /deliver <id>"
+echo "First, configure your Nextcloud share in the bot:"
+echo "  /setnc <webdav-url> <share-token>"
+echo ""
+echo "Then send a URL or file to start a job."
+echo "Commands: /list · /nc · /setnc <url> <token> · /cancel <id> · /deliver <id>"
 echo ""
 echo "To check logs: sudo journalctl -u zerorated-tgbot -f"
 echo "========================================="

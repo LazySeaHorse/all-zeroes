@@ -85,20 +85,23 @@ The wizard prompts for your bot token (from [@BotFather](https://t.me/BotFather)
 
 ### Bot env vars
 
-| Variable | Description |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | Token from @BotFather |
-| `TELEGRAM_ALLOWED_CHAT_IDS` | Comma-separated chat IDs that may use the bot |
-| `BACKEND_URL` | Backend base URL (default `http://localhost:8080`) |
-| `BACKEND_API_KEY` | API key from `users.json` |
-| `NEXTCLOUD_URL` | WebDAV share URL |
-| `NEXTCLOUD_TOKEN` | Nextcloud share token |
+| Variable | Default | Description |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | required | Token from @BotFather |
+| `TELEGRAM_ALLOWED_CHAT_IDS` | required | Comma-separated chat IDs that may use the bot |
+| `BACKEND_API_KEY` | required | API key from `users.json` (auto-detected by setup script) |
+| `BACKEND_URL` | `http://localhost:8080` | Override if backend is not on localhost |
+| `NC_CONFIG_PATH` | `/var/lib/zerorated/tgbot-nc.json` | Path to persisted Nextcloud credentials |
+
+Nextcloud credentials are not env vars — configure them inside the bot with `/setnc` and they are saved to `NC_CONFIG_PATH`.
 
 ### Bot commands
 
 | Command | Description |
 |---|---|
 | `/list` | Show all jobs with status |
+| `/nc` | Show current Nextcloud settings |
+| `/setnc <url> <token>` | Set Nextcloud WebDAV URL and share token |
 | `/cancel <id-prefix>` | Cancel and delete a job |
 | `/deliver <id-prefix>` | Start delivery for a staged job (when deliver-now is off) |
 
