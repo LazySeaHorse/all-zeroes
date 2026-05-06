@@ -8,6 +8,7 @@ User=zerorated
 ExecStart=/opt/zerorated/server
 Restart=always
 RestartSec=5
+Environment=HOME=/var/lib/zerorated
 Environment=DB_PATH=/var/lib/zerorated/state.db
 Environment=SCRATCH_DIR=/var/lib/zerorated/scratch
 Environment=LISTEN_ADDR=127.0.0.1:8080
