@@ -443,12 +443,23 @@ function renderJobCard(job) {
 function renderChunkAction(job) {
   const chunk = job.current_chunk;
   const name = chunkName(chunk.idx);
+
+  let downloadBtn = '';
+  const { ncURL, ncToken } = getSettings();
+  if (ncURL && ncToken) {
+    try {
+      const publicPhp = ncURL.indexOf('/public.php');
+      const base = publicPhp >= 0 ? ncURL.slice(0, publicPhp) : new URL(ncURL).origin;
+      const filename = chunk.url.split('/').pop();
+      const href = `${base}/s/${ncToken}/download?files=${encodeURIComponent(filename)}`;
+      downloadBtn = `<a class="btn btn-primary btn-sm" href="${esc(href)}" target="_blank" rel="noopener">⬇ Download from Nextcloud</a>`;
+    } catch { /* ignore */ }
+  }
+
   return `
     <div class="chunk-action">
       <span class="chunk-label">Ready: <strong>${esc(name)}</strong> (${fmtSize(chunk.size)})</span>
-      <button class="btn btn-primary btn-sm" onclick="downloadChunk('${esc(job.id)}', ${chunk.idx}, '${esc(chunk.url)}')">
-        ⬇ Download
-      </button>
+      ${downloadBtn}
       <button class="btn btn-success btn-sm" onclick="ackChunk('${esc(job.id)}', ${chunk.idx})">
         ✓ Mark done
       </button>
@@ -512,41 +523,6 @@ async function submitJob() {
   }
 }
 
-async function downloadChunk(jobId, chunkIdx, chunkURL) {
-  const { ncToken } = getSettings();
-  const name = chunkName(chunkIdx);
-  toast(`Fetching ${name}…`);
-  try {
-    const resp = await fetch(chunkURL, {
-      headers: { 'Authorization': 'Basic ' + btoa(ncToken + ':') },
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-    // Prefer streaming to disk (Chrome/Edge); fall back to buffered blob.
-    if ('showSaveFilePicker' in window) {
-      try {
-        const fh = await window.showSaveFilePicker({ suggestedName: name });
-        const writable = await fh.createWritable();
-        await resp.body.pipeTo(writable);
-        toast(`${name} saved.`);
-        return;
-      } catch (e) {
-        if (e.name === 'AbortError') return; // user cancelled picker
-        // Fall through to blob on other errors.
-      }
-    }
-
-    const blob = await resp.blob();
-    const blobURL = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = blobURL; a.download = name;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(blobURL), 10000);
-    toast(`${name} downloading.`);
-  } catch (e) {
-    toast(`Download failed: ${e.message}`, true);
-  }
-}
 
 async function ackChunk(jobId, chunkIdx) {
   try {
