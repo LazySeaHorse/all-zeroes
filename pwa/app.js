@@ -443,13 +443,6 @@ function renderJobCard(job) {
 function renderChunkAction(job) {
   const chunk = job.current_chunk;
   const name = chunkName(chunk.idx);
-  const sha256Row = chunk.sha256
-    ? `<div class="chunk-sha" title="SHA-256 for integrity check">
-        <span class="sha-label">SHA-256</span>
-        <code class="sha-value" id="sha-${esc(job.id)}-${chunk.idx}">${esc(chunk.sha256)}</code>
-        <button class="btn btn-ghost btn-sm" onclick="copySHA('${esc(job.id)}', ${chunk.idx})">Copy</button>
-       </div>`
-    : '';
   return `
     <div class="chunk-action">
       <span class="chunk-label">Ready: <strong>${esc(name)}</strong> (${fmtSize(chunk.size)})</span>
@@ -459,8 +452,7 @@ function renderChunkAction(job) {
       <button class="btn btn-success btn-sm" onclick="ackChunk('${esc(job.id)}', ${chunk.idx})">
         ✓ Mark done
       </button>
-    </div>
-    ${sha256Row}`;
+    </div>`;
 }
 
 function renderDone(job) {
@@ -652,12 +644,6 @@ function copyCmd(jobId) {
   const el = document.getElementById(`cmd-${jobId}`);
   if (!el) return;
   navigator.clipboard.writeText(el.textContent).then(() => toast('Copied!'));
-}
-
-function copySHA(jobId, chunkIdx) {
-  const el = document.getElementById(`sha-${jobId}-${chunkIdx}`);
-  if (!el) return;
-  navigator.clipboard.writeText(el.textContent.trim()).then(() => toast('SHA-256 copied!'));
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────

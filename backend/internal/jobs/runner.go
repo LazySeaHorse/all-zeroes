@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -408,16 +406,11 @@ func (r *runner) setupDelivery(ctx context.Context) ([]db.Chunk, error) {
 		n := numChunks(fileSize, r.cfg.ChunkSize)
 		chunks = make([]db.Chunk, n)
 		for i := 0; i < n; i++ {
-			start, size := chunkRange(i, fileSize, r.cfg.ChunkSize)
-			h := sha256.New()
-			if _, err := io.Copy(h, io.NewSectionReader(f, start, size)); err != nil {
-				return nil, fmt.Errorf("sha256 chunk %d: %w", i, err)
-			}
+			_, size := chunkRange(i, fileSize, r.cfg.ChunkSize)
 			chunks[i] = db.Chunk{
 				JobID:  r.job.ID,
 				Idx:    i,
 				Size:   size,
-				SHA256: hex.EncodeToString(h.Sum(nil)),
 				Status: db.ChunkPending,
 			}
 		}
@@ -481,7 +474,6 @@ func (r *runner) deliverChunk(ctx context.Context, chunk *db.Chunk) error {
 }
 
 // streamChunkOnce fetches one byte-range from the source and pipes it directly to Nextcloud.
-// SHA256 is computed in-flight via TeeReader and stored in the DB after upload.
 func (r *runner) streamChunkOnce(ctx context.Context, chunk *db.Chunk, chunkURL string) error {
 	start, size := chunkRange(chunk.Idx, *r.job.Size, r.cfg.ChunkSize)
 
@@ -505,13 +497,7 @@ func (r *runner) streamChunkOnce(ctx context.Context, chunk *db.Chunk, chunkURL 
 		return fmt.Errorf("source returned %d (expected 206)", resp.StatusCode)
 	}
 
-	h := sha256.New()
-	if err := nextcloud.Upload(ctx, chunkURL, r.job.NextcloudToken,
-		io.TeeReader(resp.Body, h), size); err != nil {
-		return err
-	}
-
-	return db.SetChunkSHA256(r.db, r.job.ID, chunk.Idx, hex.EncodeToString(h.Sum(nil)))
+	return nextcloud.Upload(ctx, chunkURL, r.job.NextcloudToken, resp.Body, size)
 }
 
 func (r *runner) uploadChunkOnce(ctx context.Context, chunk *db.Chunk, chunkURL string) error {
@@ -599,9 +585,8 @@ func withRetry(ctx context.Context, fn func() error) error {
 }
 
 type manifestChunk struct {
-	Idx    int    `json:"idx"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
+	Idx  int   `json:"idx"`
+	Size int64 `json:"size"`
 }
 
 type manifestDoc struct {
@@ -615,7 +600,7 @@ type manifestDoc struct {
 func buildManifest(jobID, filename string, size int64, chunks []db.Chunk) manifestDoc {
 	mc := make([]manifestChunk, len(chunks))
 	for i, c := range chunks {
-		mc[i] = manifestChunk{Idx: c.Idx, Size: c.Size, SHA256: c.SHA256}
+		mc[i] = manifestChunk{Idx: c.Idx, Size: c.Size}
 	}
 	return manifestDoc{
 		JobID:       jobID,

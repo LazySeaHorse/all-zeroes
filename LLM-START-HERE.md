@@ -72,7 +72,6 @@ The actual workhorse. One `runner` per goroutine; `run(ctx)` dispatches on `(Sta
 - **gdrive**: `acquireGDrive` (download to scratch, then `rclone copy` to remote, then delete scratch) → `STAGED`. Delivery later requires `restoreFromGDrive` (rclone copy back to scratch) before chunking.
 
 Key implementation points:
-- `setupDelivery` pre-computes per-chunk SHA-256 for vps/gdrive (it reads each section sequentially via `io.NewSectionReader`). Stream tier computes SHA-256 in-flight via `io.TeeReader` during upload.
 - A `manifest.json` is uploaded once per job at delivery start, then deleted at DONE.
 - `deliverChunk` holds `userMu` for the **full chunk lifecycle including the wait-for-ack** — no other chunk for that user can start until this one is acked. Source download for next chunk is also gated.
 - Chunk ordering: skips already-acked chunks on resurrection (resume from last persisted state).
@@ -114,7 +113,7 @@ All client logic.
 - Delete button is shown on every status; calls `DELETE /api/jobs/{id}` which now does a full purge (goroutine + scratch + row) regardless of state.
 - Retry button (FAILED / CANCELED) reads `url`/`filename`/`referer`/`user_agent`/`stage`/`deliver_now` from the response, combines with current Nextcloud creds from `localStorage`, POSTs `/api/jobs`, then deletes the old row. Implementation choice: retry creates a **new** job rather than mutating the dead one — avoids reasoning about orphaned chunks, partial scratch, and the cleared `nextcloud_token` on terminal jobs.
 - `buildConcatCmd` detects Windows via `navigator.userAgent` and emits `copy /b` instead of `cat`.
-- `esc()` is the only HTML-escape utility — used everywhere user-controlled strings (filename, error, chunk URL, sha) are interpolated into HTML.
+- `esc()` is the only HTML-escape utility — used everywhere user-controlled strings (filename, error, chunk URL) are interpolated into HTML.
 - **Job list split**: active jobs (QUEUED/ACQUIRING/STAGED/DELIVERING) render at the top; terminal jobs (DONE/FAILED/CANCELED) collapse into an "Archive (N)" section. Collapsed state persists in `localStorage` under `az_archive_open`.
 - **Rate tracking**: `state.rates[jobId]` holds EWMA speed for ACQUIRING jobs. Updated on every SSE tick; cleared on terminal status. Displayed as `5.2 MB/s · 3m left` in the meta line.
 - **NC folder link**: each card has a `↗` button opening `<nc-host>/s/<token>` (derived from `ncURL` + `ncToken` settings; strips `/public.php` suffix for subpath installs). `ncFolderURL()` is the single source — don't rebuild inline.

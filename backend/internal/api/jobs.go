@@ -59,10 +59,9 @@ type jobResponse struct {
 }
 
 type chunkInfo struct {
-	Idx    int    `json:"idx"`
-	URL    string `json:"url"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256,omitempty"`
+	Idx  int    `json:"idx"`
+	URL  string `json:"url"`
+	Size int64  `json:"size"`
 }
 
 func submitHandler(mgr jobManager, database *sql.DB) http.HandlerFunc {
@@ -426,10 +425,9 @@ func jobToResponse(j *db.Job, chunks []db.Chunk) jobResponse {
 		if current == nil &&
 			(chunks[i].Status == db.ChunkUploaded || chunks[i].Status == db.ChunkUploading) {
 			current = &chunkInfo{
-				Idx:    chunks[i].Idx,
-				URL:    jobs.ChunkURL(j.NextcloudURL, j.ID, chunks[i].Idx),
-				Size:   chunks[i].Size,
-				SHA256: chunks[i].SHA256,
+				Idx:  chunks[i].Idx,
+				URL:  jobs.ChunkURL(j.NextcloudURL, j.ID, chunks[i].Idx),
+				Size: chunks[i].Size,
 			}
 		}
 	}

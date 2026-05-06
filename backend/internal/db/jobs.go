@@ -50,7 +50,6 @@ type Chunk struct {
 	JobID      string
 	Idx        int
 	Size       int64
-	SHA256     string // empty until computed
 	Status     string
 	UploadedAt *int64
 	AckedAt    *int64
@@ -208,15 +207,15 @@ func InsertChunks(db *sql.DB, jobID string, chunks []Chunk) error {
 	defer tx.Rollback() //nolint:errcheck
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO chunks (job_id, idx, size, sha256, status)
-		VALUES (?, ?, ?, ?, ?)`)
+		INSERT INTO chunks (job_id, idx, size, status)
+		VALUES (?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	for _, c := range chunks {
-		if _, err := stmt.Exec(jobID, c.Idx, c.Size, nullStr(c.SHA256), c.Status); err != nil {
+		if _, err := stmt.Exec(jobID, c.Idx, c.Size, c.Status); err != nil {
 			return err
 		}
 	}
@@ -225,7 +224,7 @@ func InsertChunks(db *sql.DB, jobID string, chunks []Chunk) error {
 
 func GetChunks(db *sql.DB, jobID string) ([]Chunk, error) {
 	rows, err := db.Query(`
-		SELECT job_id, idx, size, sha256, status, uploaded_at, acked_at
+		SELECT job_id, idx, size, status, uploaded_at, acked_at
 		FROM chunks WHERE job_id = ? ORDER BY idx`, jobID)
 	if err != nil {
 		return nil, err
@@ -235,21 +234,12 @@ func GetChunks(db *sql.DB, jobID string) ([]Chunk, error) {
 	var chunks []Chunk
 	for rows.Next() {
 		var c Chunk
-		var sha sql.NullString
-		if err := rows.Scan(&c.JobID, &c.Idx, &c.Size, &sha, &c.Status, &c.UploadedAt, &c.AckedAt); err != nil {
+		if err := rows.Scan(&c.JobID, &c.Idx, &c.Size, &c.Status, &c.UploadedAt, &c.AckedAt); err != nil {
 			return nil, err
-		}
-		if sha.Valid {
-			c.SHA256 = sha.String
 		}
 		chunks = append(chunks, c)
 	}
 	return chunks, rows.Err()
-}
-
-func SetChunkSHA256(db *sql.DB, jobID string, idx int, digest string) error {
-	_, err := db.Exec(`UPDATE chunks SET sha256=? WHERE job_id=? AND idx=?`, digest, jobID, idx)
-	return err
 }
 
 func SetChunkStatus(db *sql.DB, jobID string, idx int, status string) error {
