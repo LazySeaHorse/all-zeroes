@@ -378,10 +378,11 @@ func (r *runner) setupDelivery(ctx context.Context) ([]db.Chunk, error) {
 			return nil, errors.New("stream job has no file size")
 		}
 		fileSize = *r.job.Size
-		n := numChunks(fileSize, r.cfg.ChunkSize)
+		cs := r.effectiveChunkSize(fileSize)
+		n := numChunks(fileSize, cs)
 		chunks = make([]db.Chunk, n)
 		for i := 0; i < n; i++ {
-			_, size := chunkRange(i, fileSize, r.cfg.ChunkSize)
+			_, size := chunkRange(i, fileSize, cs)
 			chunks[i] = db.Chunk{JobID: r.job.ID, Idx: i, Size: size, Status: db.ChunkPending}
 		}
 	} else {
@@ -403,10 +404,11 @@ func (r *runner) setupDelivery(ctx context.Context) ([]db.Chunk, error) {
 			r.job.Size = &fileSize
 		}
 
-		n := numChunks(fileSize, r.cfg.ChunkSize)
+		cs := r.effectiveChunkSize(fileSize)
+		n := numChunks(fileSize, cs)
 		chunks = make([]db.Chunk, n)
 		for i := 0; i < n; i++ {
-			_, size := chunkRange(i, fileSize, r.cfg.ChunkSize)
+			_, size := chunkRange(i, fileSize, cs)
 			chunks[i] = db.Chunk{
 				JobID:  r.job.ID,
 				Idx:    i,
@@ -475,7 +477,8 @@ func (r *runner) deliverChunk(ctx context.Context, chunk *db.Chunk) error {
 
 // streamChunkOnce fetches one byte-range from the source and pipes it directly to Nextcloud.
 func (r *runner) streamChunkOnce(ctx context.Context, chunk *db.Chunk, chunkURL string) error {
-	start, size := chunkRange(chunk.Idx, *r.job.Size, r.cfg.ChunkSize)
+	fileSize := *r.job.Size
+	start, size := chunkRange(chunk.Idx, fileSize, r.effectiveChunkSize(fileSize))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.job.URL, nil)
 	if err != nil {
@@ -511,12 +514,22 @@ func (r *runner) uploadChunkOnce(ctx context.Context, chunk *db.Chunk, chunkURL 
 	if err != nil {
 		return err
 	}
-	start, size := chunkRange(chunk.Idx, info.Size(), r.cfg.ChunkSize)
+	fileSize := info.Size()
+	start, size := chunkRange(chunk.Idx, fileSize, r.effectiveChunkSize(fileSize))
 	section := io.NewSectionReader(f, start, size)
 	return nextcloud.Upload(ctx, chunkURL, r.job.NextcloudToken, section, size)
 }
 
 // --- Helpers ---
+
+// effectiveChunkSize returns the chunk size to use for this job.
+// When no_chunk is set, the full file is treated as one chunk.
+func (r *runner) effectiveChunkSize(fileSize int64) int64 {
+	if r.job.NoChunk {
+		return fileSize
+	}
+	return r.cfg.ChunkSize
+}
 
 func (r *runner) ncURL(path string) string {
 	return NextcloudObjectURL(r.job.NextcloudURL, r.job.ID, path)

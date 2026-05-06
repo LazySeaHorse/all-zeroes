@@ -505,6 +505,7 @@ async function submitJob() {
     user_agent: document.getElementById('f-ua').value.trim() || undefined,
     stage: document.getElementById('f-stage').value,
     deliver_now: document.getElementById('f-deliver-now').checked,
+    no_chunk: document.getElementById('f-no-chunk').checked,
     nextcloud_url: s.ncURL,
     nextcloud_token: s.ncToken,
   };
@@ -597,6 +598,7 @@ async function retryJob(jobId) {
     user_agent: job.user_agent || undefined,
     stage: job.stage,
     deliver_now: job.deliver_now,
+    no_chunk: job.no_chunk,
     nextcloud_url: s.ncURL,
     nextcloud_token: s.ncToken,
   };

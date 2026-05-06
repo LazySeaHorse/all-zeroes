@@ -34,6 +34,7 @@ type submitRequest struct {
 	Filename       string `json:"filename"`
 	Stage          string `json:"stage"`
 	DeliverNow     *bool  `json:"deliver_now"`
+	NoChunk        bool   `json:"no_chunk"`
 	NextcloudURL   string `json:"nextcloud_url"`
 	NextcloudToken string `json:"nextcloud_token"`
 }
@@ -49,6 +50,7 @@ type jobResponse struct {
 	Status        string     `json:"status"`
 	Stage         string     `json:"stage"`
 	DeliverNow    bool       `json:"deliver_now"`
+	NoChunk       bool       `json:"no_chunk"`
 	Error         *string    `json:"error"`
 	AcquiredBytes int64      `json:"acquired_bytes"`
 	ChunksTotal   int        `json:"chunks_total"`
@@ -142,6 +144,7 @@ func submitHandler(mgr jobManager, database *sql.DB) http.HandlerFunc {
 			NextcloudURL:   req.NextcloudURL,
 			NextcloudToken: req.NextcloudToken,
 			DeliverNow:     deliverNow,
+			NoChunk:        req.NoChunk,
 		}
 		if err := db.CreateJob(database, j); err != nil {
 			http.Error(w, "failed to create job", http.StatusInternalServerError)
@@ -454,6 +457,7 @@ func jobToResponse(j *db.Job, chunks []db.Chunk) jobResponse {
 		Status:        j.Status,
 		Stage:         j.Stage,
 		DeliverNow:    j.DeliverNow,
+		NoChunk:       j.NoChunk,
 		Error:         j.Error,
 		AcquiredBytes: j.AcquiredBytes,
 		ChunksTotal:   total,

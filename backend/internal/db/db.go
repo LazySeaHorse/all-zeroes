@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -81,6 +82,15 @@ func migrate(db *sql.DB) error {
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
+			return err
+		}
+	}
+
+	// Additive column migrations — ignore "duplicate column name" on re-runs.
+	for _, s := range []string{
+		`ALTER TABLE jobs ADD COLUMN no_chunk INTEGER NOT NULL DEFAULT 0`,
+	} {
+		if _, err := db.Exec(s); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			return err
 		}
 	}

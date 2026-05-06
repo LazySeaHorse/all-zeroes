@@ -487,6 +487,11 @@ select option { background: var(--bg); color: var(--text); }
         <label for="f-deliver-now">Deliver now (start chunking immediately after download)</label>
       </div>
 
+      <div class="toggle-row">
+        <input type="checkbox" id="f-no-chunk">
+        <label for="f-no-chunk">No chunking — deliver as a single file (only tick this if you know the file is less than 3 GB)</label>
+      </div>
+
       <p class="hint">Using backend: <span id="hint-backend">—</span></p>
       <button class="btn btn-primary" style="width: 100%" onclick="submitJob()">Submit Job</button>
     </div>
@@ -521,7 +526,7 @@ select option { background: var(--bg); color: var(--text); }
       <button class="btn btn-primary" style="width: 100%" onclick="saveSettings()">Save Settings</button>
       <div style="display:flex;gap:8px;margin-top:12px;">
         <button class="btn btn-ghost" style="flex:1" onclick="exportSettings()">Export JSON</button>
-        <label class="btn btn-ghost" style="flex:1;cursor:pointer">
+        <label class="btn btn-ghost" style="flex:1;cursor:pointer;margin-bottom:0">
           Import JSON
           <input type="file" id="s-import-file" accept=".json,application/json,text/plain" style="display:none" onchange="importSettingsFile(event)">
         </label>

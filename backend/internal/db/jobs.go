@@ -41,6 +41,7 @@ type Job struct {
 	NextcloudURL   string
 	NextcloudToken string
 	DeliverNow     bool
+	NoChunk        bool
 	CreatedAt      int64
 	UpdatedAt      int64
 }
@@ -66,11 +67,11 @@ func CreateJob(db *sql.DB, j *Job) error {
 	_, err := db.Exec(`
 		INSERT INTO jobs
 			(id, user_key, url, headers_json, filename, size, stage, status,
-			 acquired_bytes, nextcloud_url, nextcloud_token, deliver_now,
+			 acquired_bytes, nextcloud_url, nextcloud_token, deliver_now, no_chunk,
 			 created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?, 0,?,?,?, ?,?)`,
+		VALUES (?,?,?,?,?,?,?,?, 0,?,?,?,?, ?,?)`,
 		j.ID, j.UserKey, j.URL, nullStr(j.HeadersJSON), j.Filename, size, j.Stage, j.Status,
-		j.NextcloudURL, j.NextcloudToken, boolInt(j.DeliverNow),
+		j.NextcloudURL, j.NextcloudToken, boolInt(j.DeliverNow), boolInt(j.NoChunk),
 		now, now,
 	)
 	return err
@@ -80,7 +81,7 @@ func GetJob(db *sql.DB, id string) (*Job, error) {
 	row := db.QueryRow(`
 		SELECT id, user_key, url, headers_json, filename, size, stage, status,
 		       error, acquired_bytes, scratch_path, gdrive_path,
-		       nextcloud_url, nextcloud_token, deliver_now, created_at, updated_at
+		       nextcloud_url, nextcloud_token, deliver_now, no_chunk, created_at, updated_at
 		FROM jobs WHERE id = ?`, id)
 	return scanJob(row)
 }
@@ -89,7 +90,7 @@ func GetJobForUser(db *sql.DB, id, userKey string) (*Job, error) {
 	row := db.QueryRow(`
 		SELECT id, user_key, url, headers_json, filename, size, stage, status,
 		       error, acquired_bytes, scratch_path, gdrive_path,
-		       nextcloud_url, nextcloud_token, deliver_now, created_at, updated_at
+		       nextcloud_url, nextcloud_token, deliver_now, no_chunk, created_at, updated_at
 		FROM jobs WHERE id = ? AND user_key = ?`, id, userKey)
 	return scanJob(row)
 }
@@ -98,7 +99,7 @@ func ListJobsByUser(db *sql.DB, userKey string) ([]Job, error) {
 	rows, err := db.Query(`
 		SELECT id, user_key, url, headers_json, filename, size, stage, status,
 		       error, acquired_bytes, scratch_path, gdrive_path,
-		       nextcloud_url, nextcloud_token, deliver_now, created_at, updated_at
+		       nextcloud_url, nextcloud_token, deliver_now, no_chunk, created_at, updated_at
 		FROM jobs WHERE user_key = ?
 		ORDER BY created_at DESC`, userKey)
 	if err != nil {
@@ -122,7 +123,7 @@ func GetNonTerminalJobs(db *sql.DB) ([]Job, error) {
 	rows, err := db.Query(`
 		SELECT id, user_key, url, headers_json, filename, size, stage, status,
 		       error, acquired_bytes, scratch_path, gdrive_path,
-		       nextcloud_url, nextcloud_token, deliver_now, created_at, updated_at
+		       nextcloud_url, nextcloud_token, deliver_now, no_chunk, created_at, updated_at
 		FROM jobs WHERE status NOT IN ('DONE','FAILED','CANCELED')`)
 	if err != nil {
 		return nil, err
@@ -270,12 +271,12 @@ func scanJob(s scanner) (*Job, error) {
 	var j Job
 	var headersJSON, scratchPath, gdrivePath, errStr sql.NullString
 	var size sql.NullInt64
-	var deliverNow int64
+	var deliverNow, noChunk int64
 
 	err := s.Scan(
 		&j.ID, &j.UserKey, &j.URL, &headersJSON, &j.Filename, &size, &j.Stage, &j.Status,
 		&errStr, &j.AcquiredBytes, &scratchPath, &gdrivePath,
-		&j.NextcloudURL, &j.NextcloudToken, &deliverNow, &j.CreatedAt, &j.UpdatedAt,
+		&j.NextcloudURL, &j.NextcloudToken, &deliverNow, &noChunk, &j.CreatedAt, &j.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -299,6 +300,7 @@ func scanJob(s scanner) (*Job, error) {
 		j.GdrivePath = gdrivePath.String
 	}
 	j.DeliverNow = deliverNow != 0
+	j.NoChunk = noChunk != 0
 	return &j, nil
 }
 
