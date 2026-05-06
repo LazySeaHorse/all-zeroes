@@ -41,29 +41,31 @@ type submitRequest struct {
 
 // jobResponse is the JSON shape returned for a single job.
 type jobResponse struct {
-	ID            string     `json:"id"`
-	URL           string     `json:"url"`
-	Filename      string     `json:"filename"`
-	Referer       string     `json:"referer,omitempty"`
-	UserAgent     string     `json:"user_agent,omitempty"`
-	Size          *int64     `json:"size"`
-	Status        string     `json:"status"`
-	Stage         string     `json:"stage"`
-	DeliverNow    bool       `json:"deliver_now"`
-	NoChunk       bool       `json:"no_chunk"`
-	Error         *string    `json:"error"`
-	AcquiredBytes int64      `json:"acquired_bytes"`
-	ChunksTotal   int        `json:"chunks_total"`
-	ChunksDone    int        `json:"chunks_done"`
-	CurrentChunk  *chunkInfo `json:"current_chunk"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID             string     `json:"id"`
+	URL            string     `json:"url"`
+	Filename       string     `json:"filename"`
+	Referer        string     `json:"referer,omitempty"`
+	UserAgent      string     `json:"user_agent,omitempty"`
+	Size           *int64     `json:"size"`
+	Status         string     `json:"status"`
+	Stage          string     `json:"stage"`
+	DeliverNow     bool       `json:"deliver_now"`
+	NoChunk        bool       `json:"no_chunk"`
+	Error          *string    `json:"error"`
+	AcquiredBytes  int64      `json:"acquired_bytes"`
+	ChunksTotal    int        `json:"chunks_total"`
+	ChunksDone     int        `json:"chunks_done"`
+	CurrentChunk   *chunkInfo `json:"current_chunk"`   // uploaded, user should download this
+	UploadingChunk *chunkInfo `json:"uploading_chunk"` // currently uploading to Nextcloud
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 type chunkInfo struct {
-	Idx  int    `json:"idx"`
-	URL  string `json:"url"`
-	Size int64  `json:"size"`
+	Idx    int    `json:"idx"`
+	URL    string `json:"url"`
+	Size   int64  `json:"size"`
+	Status string `json:"status"` // "uploading" or "uploaded"
 }
 
 func submitHandler(mgr jobManager, database *sql.DB) http.HandlerFunc {
@@ -418,21 +420,37 @@ func probeURL(ctx context.Context, rawURL, referer, userAgent string) probeRespo
 // jobToResponse converts a Job and its chunks to the response shape.
 func jobToResponse(j *db.Job, chunks []db.Chunk) jobResponse {
 	var total, done int
-	var current *chunkInfo
+	var current, uploading *chunkInfo
 
 	for i := range chunks {
 		total++
 		if chunks[i].Status == db.ChunkAcked {
 			done++
+			continue
 		}
-		if current == nil &&
-			(chunks[i].Status == db.ChunkUploaded || chunks[i].Status == db.ChunkUploading) {
+		if chunks[i].Status == db.ChunkUploaded && current == nil {
 			current = &chunkInfo{
-				Idx:  chunks[i].Idx,
-				URL:  jobs.ChunkURL(j.NextcloudURL, j.ID, chunks[i].Idx),
-				Size: chunks[i].Size,
+				Idx:    chunks[i].Idx,
+				URL:    jobs.ChunkURL(j.NextcloudURL, j.ID, chunks[i].Idx),
+				Size:   chunks[i].Size,
+				Status: "uploaded",
 			}
 		}
+		if chunks[i].Status == db.ChunkUploading && uploading == nil {
+			uploading = &chunkInfo{
+				Idx:    chunks[i].Idx,
+				URL:    jobs.ChunkURL(j.NextcloudURL, j.ID, chunks[i].Idx),
+				Size:   chunks[i].Size,
+				Status: "uploading",
+			}
+		}
+	}
+
+	// If nothing is uploaded yet but something is uploading (e.g. first chunk still
+	// in progress), surface it as current_chunk so the frontend can show "Uploading…".
+	if current == nil && uploading != nil {
+		current = uploading
+		uploading = nil
 	}
 
 	var referer, userAgent string
@@ -448,22 +466,23 @@ func jobToResponse(j *db.Job, chunks []db.Chunk) jobResponse {
 	}
 
 	return jobResponse{
-		ID:            j.ID,
-		URL:           j.URL,
-		Filename:      j.Filename,
-		Referer:       referer,
-		UserAgent:     userAgent,
-		Size:          j.Size,
-		Status:        j.Status,
-		Stage:         j.Stage,
-		DeliverNow:    j.DeliverNow,
-		NoChunk:       j.NoChunk,
-		Error:         j.Error,
-		AcquiredBytes: j.AcquiredBytes,
-		ChunksTotal:   total,
-		ChunksDone:    done,
-		CurrentChunk:  current,
-		CreatedAt:     time.Unix(j.CreatedAt, 0).UTC(),
-		UpdatedAt:     time.Unix(j.UpdatedAt, 0).UTC(),
+		ID:             j.ID,
+		URL:            j.URL,
+		Filename:       j.Filename,
+		Referer:        referer,
+		UserAgent:      userAgent,
+		Size:           j.Size,
+		Status:         j.Status,
+		Stage:          j.Stage,
+		DeliverNow:     j.DeliverNow,
+		NoChunk:        j.NoChunk,
+		Error:          j.Error,
+		AcquiredBytes:  j.AcquiredBytes,
+		ChunksTotal:    total,
+		ChunksDone:     done,
+		CurrentChunk:   current,
+		UploadingChunk: uploading,
+		CreatedAt:      time.Unix(j.CreatedAt, 0).UTC(),
+		UpdatedAt:      time.Unix(j.UpdatedAt, 0).UTC(),
 	}
 }

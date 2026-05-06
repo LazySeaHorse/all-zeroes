@@ -444,6 +444,15 @@ function renderChunkAction(job) {
   const chunk = job.current_chunk;
   const name = chunkName(chunk.idx);
 
+  // Chunk is still uploading to Nextcloud — not available for download yet.
+  if (chunk.status === 'uploading') {
+    return `
+      <div class="chunk-action">
+        <span class="chunk-label">Uploading <strong>${esc(name)}</strong> (${fmtSize(chunk.size)}) to Nextcloud…</span>
+      </div>`;
+  }
+
+  // Chunk is uploaded — show download + ack UI.
   let downloadBtn = '';
   const { ncURL, ncToken } = getSettings();
   if (ncURL && ncToken) {
@@ -456,6 +465,13 @@ function renderChunkAction(job) {
     } catch { /* ignore */ }
   }
 
+  // Secondary line shown when the next chunk is already being pre-uploaded.
+  let nextUploadingLine = '';
+  if (job.uploading_chunk) {
+    const nextName = chunkName(job.uploading_chunk.idx);
+    nextUploadingLine = `<span class="chunk-label" style="opacity:0.65">Uploading ${esc(nextName)} in background…</span>`;
+  }
+
   return `
     <div class="chunk-action">
       <span class="chunk-label">Ready: <strong>${esc(name)}</strong> (${fmtSize(chunk.size)})</span>
@@ -463,6 +479,7 @@ function renderChunkAction(job) {
       <button class="btn btn-success btn-sm" onclick="ackChunk('${esc(job.id)}', ${chunk.idx})">
         ✓ Mark done
       </button>
+      ${nextUploadingLine}
     </div>`;
 }
 

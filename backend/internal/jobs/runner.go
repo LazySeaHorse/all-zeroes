@@ -218,13 +218,85 @@ func (r *runner) deliver(ctx context.Context) error {
 	}
 	r.notify(r.job.UserKey, r.job.ID)
 
+	// preUpload tracks an in-flight background upload of the next chunk so it
+	// can be running while the user downloads and acks the current chunk.
+	type preUpload struct {
+		chunk *db.Chunk
+		errCh chan error // buffered(1); goroutine sends result here
+	}
+	var pending *preUpload
+
 	for i := range chunks {
 		if chunks[i].Status == db.ChunkAcked {
-			continue // already done; resume from here on resurrection
+			continue // already done; skip on resurrection
 		}
-		if err := r.deliverChunk(ctx, &chunks[i]); err != nil {
+
+		// ── Phase 1: ensure this chunk is uploaded ────────────────────────────
+
+		if pending != nil && pending.chunk.Idx == chunks[i].Idx {
+			// Upload was pre-started in the previous iteration; wait for it.
+			select {
+			case err := <-pending.errCh:
+				if err != nil {
+					return fmt.Errorf("upload chunk %d: %w", chunks[i].Idx, err)
+				}
+			case <-ctx.Done():
+				<-pending.errCh // drain so the goroutine can exit
+				return ctx.Err()
+			}
+			pending = nil
+		} else {
+			// Upload synchronously (first chunk, or no pre-start available).
+			db.SetChunkStatus(r.db, r.job.ID, chunks[i].Idx, db.ChunkUploading) //nolint:errcheck
+			r.notify(r.job.UserKey, r.job.ID)
+			if err := r.doUploadChunk(ctx, &chunks[i]); err != nil {
+				return fmt.Errorf("upload chunk %d: %w", chunks[i].Idx, err)
+			}
+		}
+
+		if err := db.SetChunkStatus(r.db, r.job.ID, chunks[i].Idx, db.ChunkUploaded); err != nil {
 			return err
 		}
+		slog.Info("chunk uploaded", "job", r.job.ID, "chunk", chunks[i].Idx, "size", chunks[i].Size)
+		r.notify(r.job.UserKey, r.job.ID)
+
+		// ── Phase 2: pre-start uploading the next chunk ───────────────────────
+		// This runs concurrently while the user downloads and acks the current chunk.
+		// At most 2 chunks are on Nextcloud at once: the one being downloaded + this one.
+
+		nextIdx := i + 1
+		for nextIdx < len(chunks) && chunks[nextIdx].Status == db.ChunkAcked {
+			nextIdx++ // skip already-acked chunks (resurrection edge case)
+		}
+		if nextIdx < len(chunks) {
+			errCh := make(chan error, 1)
+			db.SetChunkStatus(r.db, r.job.ID, chunks[nextIdx].Idx, db.ChunkUploading) //nolint:errcheck
+			r.notify(r.job.UserKey, r.job.ID)
+			nextChunk := &chunks[nextIdx]
+			go func() {
+				errCh <- r.doUploadChunk(ctx, nextChunk)
+			}()
+			pending = &preUpload{chunk: nextChunk, errCh: errCh}
+		}
+
+		// ── Phase 3: wait for user ack, then delete ───────────────────────────
+
+		chunkURL := r.ncChunkURL(chunks[i].Idx)
+		select {
+		case <-r.ackCh:
+		case <-ctx.Done():
+			if pending != nil {
+				<-pending.errCh // drain so the goroutine can exit
+			}
+			return ctx.Err()
+		}
+
+		nextcloud.Delete(ctx, chunkURL, r.job.NextcloudToken) //nolint:errcheck
+		if err := db.SetChunkStatus(r.db, r.job.ID, chunks[i].Idx, db.ChunkAcked); err != nil {
+			return err
+		}
+		slog.Info("chunk acked", "job", r.job.ID, "chunk", chunks[i].Idx)
+		r.notify(r.job.UserKey, r.job.ID)
 	}
 
 	// All chunks acked. Clean up.
@@ -434,45 +506,16 @@ func (r *runner) setupDelivery(ctx context.Context) ([]db.Chunk, error) {
 	return chunks, nil
 }
 
-func (r *runner) deliverChunk(ctx context.Context, chunk *db.Chunk) error {
-	r.userMu.Lock()
-	defer r.userMu.Unlock()
-
-	db.SetChunkStatus(r.db, r.job.ID, chunk.Idx, db.ChunkUploading) //nolint:errcheck
-
+// doUploadChunk performs only the Nextcloud upload for a chunk (with retry).
+// It does not touch DB status or send notifications — callers handle that.
+func (r *runner) doUploadChunk(ctx context.Context, chunk *db.Chunk) error {
 	chunkURL := r.ncChunkURL(chunk.Idx)
-	err := withRetry(ctx, func() error {
+	return withRetry(ctx, func() error {
 		if r.job.Stage == "stream" {
 			return r.streamChunkOnce(ctx, chunk, chunkURL)
 		}
 		return r.uploadChunkOnce(ctx, chunk, chunkURL)
 	})
-	if err != nil {
-		return fmt.Errorf("upload chunk %d: %w", chunk.Idx, err)
-	}
-
-	if err := db.SetChunkStatus(r.db, r.job.ID, chunk.Idx, db.ChunkUploaded); err != nil {
-		return err
-	}
-	slog.Info("chunk uploaded", "job", r.job.ID, "chunk", chunk.Idx, "size", chunk.Size)
-	r.notify(r.job.UserKey, r.job.ID)
-
-	// Wait for user ack.
-	select {
-	case <-r.ackCh:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	// Delete chunk from Nextcloud before releasing the user mutex.
-	nextcloud.Delete(ctx, chunkURL, r.job.NextcloudToken) //nolint:errcheck
-
-	if err := db.SetChunkStatus(r.db, r.job.ID, chunk.Idx, db.ChunkAcked); err != nil {
-		return err
-	}
-	slog.Info("chunk acked", "job", r.job.ID, "chunk", chunk.Idx)
-	r.notify(r.job.UserKey, r.job.ID)
-	return nil
 }
 
 // streamChunkOnce fetches one byte-range from the source and pipes it directly to Nextcloud.

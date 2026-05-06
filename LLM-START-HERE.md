@@ -50,7 +50,8 @@ All `/api/jobs*` handlers plus `GET /api/probe`. Notes:
 - `submitHandler` does the HEAD-for-Range check **synchronously** when `stage=stream` so it can reject with a useful 400 before creating the job; size is captured here and stored on creation.
 - For `stage=gdrive`, requires `is_owner`.
 - `jobManager` is an interface (not the concrete `*jobs.Manager`) — the API layer only sees `Start/AckChunk/Cancel/StartDeliver/MoveToGDrive`. Keeps tests simple.
-- `jobToResponse` builds a `current_chunk.url` for the PWA via `jobs.ChunkURL` — the same helper the runner uses to PUT the chunk. Single source of truth; don't reintroduce a parallel formatter.
+- `jobToResponse` builds chunk URLs via `jobs.ChunkURL` — the same helper the runner uses to PUT the chunk. Single source of truth; don't reintroduce a parallel formatter.
+- **Two chunk fields in the response**: `current_chunk` = the chunk that is fully uploaded and ready to download (`status: "uploaded"`); `uploading_chunk` = the next chunk currently being pre-uploaded in the background (`status: "uploading"`). Both can be non-null simultaneously (pipelined delivery). If nothing is uploaded yet but a chunk is uploading (first chunk still in progress), `current_chunk` carries the uploading chunk so the frontend always has something to render. `chunkInfo` now includes a `status` field.
 - `probeHandler` / `probeURL`: HEAD-probes an arbitrary URL and returns `{size, filename, content_type, accept_ranges}`. Uses the existing `headClient` (30 s timeout). Non-200 responses return a soft `{error: "..."}` JSON rather than a 4xx so the PWA can display the warning without blocking submit. Content-Disposition filename parsed via `mime.ParseMediaType`; falls back to `jobs.FilenameFromURL`.
 - The response also exposes `referer` and `user_agent` (parsed out of `headers_json`) so the PWA can resubmit a job with the same params on retry without a dedicated server-side clone endpoint.
 - `DELETE /api/jobs/{id}` calls `mgr.Purge` (full removal: cancel goroutine if alive, remove scratch dir, drop the row). Works on any state, including terminal — that's how the PWA "delete from list" button cleans up DONE/FAILED/CANCELED jobs.
@@ -79,8 +80,10 @@ The actual workhorse. One `runner` per goroutine; `run(ctx)` dispatches on `(Sta
 
 Key implementation points:
 - A `manifest.json` is uploaded once per job at delivery start, then deleted at DONE.
-- `deliverChunk` holds `userMu` for the **full chunk lifecycle including the wait-for-ack** — no other chunk for that user can start until this one is acked. Source download for next chunk is also gated.
-- Chunk ordering: skips already-acked chunks on resurrection (resume from last persisted state).
+- **Pipelined delivery**: `deliver()` uses a 2-chunk sliding window. After chunk N finishes uploading, a background goroutine immediately starts uploading chunk N+1 while the main goroutine waits for the user to ack chunk N. When the ack arrives, the loop advances and waits for the goroutine to finish before marking N+1 as uploaded. This means at most 2 chunks are on Nextcloud at once (the one being downloaded + the one being pre-uploaded), which fits within the 3 GB per-user Nextcloud cap with 1.5 GB chunk size. The pre-upload goroutine uses a buffered-1 channel; context cancellation drains the channel before returning to avoid goroutine leaks.
+- `doUploadChunk(ctx, chunk)` is the low-level upload helper (Nextcloud PUT + retry, no DB writes). The delivery loop calls it directly — both synchronously for the current chunk and via goroutine for the pre-upload.
+- SSE notifications are sent when a chunk enters `uploading` state (so the UI can show "Uploading…") and again when it reaches `uploaded` (so the UI can show "Ready").
+- Chunk ordering: skips already-acked chunks on resurrection (resume from last persisted state). Non-acked chunks are always re-uploaded on resurrection (WebDAV PUT is idempotent).
 - `withRetry`: 3 attempts at 1s/4s/16s. `noRetryErr` and `nextcloud.IsClientError` short-circuit. Context cancel is also non-retriable.
 - **Naming**: `ncURL(path)` returns `<base>/<jobID>_<path>` (underscore separator, **flat**, no MKCOL). This was changed in commit `e4774de` because subdirectory creation via MKCOL on public Nextcloud shares wasn't reliable. So `manifest.json` lives at `<base>/<jobID>_manifest.json` and chunks at `<base>/<jobID>_part_0000.bin`.
 - `progressWriter` flushes acquired_bytes to DB every 1 MB to keep write rate sane.
@@ -126,6 +129,7 @@ All client logic.
 - **Probe**: URL field fires `GET /api/probe?url=...` (500 ms debounce) on input. Shows size / content-type / streaming support below the field; auto-fills filename if blank.
 - **Disk gauge**: polls `GET /healthz` every 30 s; shows "X GB free" in the header. Highlighted red below 5 GB. Loop starts unconditionally at boot — `updateDiskGauge` returns early if `backendURL` not set.
 - **Keyboard shortcuts**: `n` opens the submit modal; `Esc` closes any open modal. Paste a URL outside an input to open the modal pre-filled (fires probe automatically).
+- **Chunk status rendering**: `renderChunkAction` checks `current_chunk.status`. If `"uploading"` → shows "Uploading `part_000N.bin` to Nextcloud…" with no action buttons. If `"uploaded"` → shows the download link + "Mark done" button. If `job.uploading_chunk` is also set (next chunk pre-uploading in background), a dimmed secondary line is shown below the ack button so the user knows the next chunk is already being prepared.
 
 ### [pwa/sw.js](pwa/sw.js)
 Service worker for installability only. Caches the static shell (`/`, `index.html`, `app.js`, `icon.svg`, `manifest.json`); never caches API responses (intentional — always fetch live).
@@ -184,7 +188,7 @@ GitHub Pages publish for `/pwa`.
 ## Non-obvious decisions / context
 
 1. **Flat NC paths, not subdirs.** All chunks and the manifest live as `<jobID>_<filename>` siblings, not inside a `<jobID>/` directory. MKCOL on public shares wasn't reliable. The `Mkdir` function still exists but is unused. URL construction is centralised in `jobs.NextcloudObjectURL` / `jobs.ChunkURL` — use those rather than rebuilding strings.
-2. **Per-user mutex held across ack wait.** Means a single user's job blocks all that user's chunk progress while waiting on a human click. This is intentional — it matches the 3 GB Nextcloud cap (only one 1.5 GB chunk on Nextcloud at a time per user).
+2. **2-chunk sliding window during delivery.** `deliver()` pre-uploads chunk N+1 in a background goroutine while waiting for the user to ack chunk N. This means at most 2 chunks (3 GB total) are on Nextcloud simultaneously, which fits the per-user cap. The `userMu` field still exists on `runner` (set by the manager) but is no longer used in the delivery loop — it was replaced by the natural sequencing of the pipeline. If two jobs for the same user deliver concurrently (unusual), they could exceed the cap; accepted as a known edge case.
 11. **`no_chunk` flag.** When set, `runner.effectiveChunkSize(fileSize)` returns `fileSize` instead of `cfg.ChunkSize`, so the entire file becomes chunk 0. The PWA checkbox warns users to only use this for files < 3 GB. The flag is stored in `jobs.no_chunk` (INTEGER, additive migration) and round-trips through `submitRequest` / `jobResponse`. Retry preserves it.
 3. **Stream tier holds the global semaphore for its whole run.** Stream jobs continuously pull Range requests from source, so we count them as a long-running acquisition rather than free up the slot between chunks. Don't refactor this without thinking about source-side rate limiting.
 4. **No polling Nextcloud.** Client ack is the **sole** trigger for advancing. The backend never queries NC to see if a chunk was downloaded.
