@@ -69,19 +69,53 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now zerorated
 ```
 
+## Telegram bot
+
+An optional Telegram bot that mirrors the PWA workflow: send a URL or file, pick options (stage, no-chunk, deliver-now), and the bot messages you each chunk link with a Done/Cancel button. Polls the backend every 4 seconds.
+
+### Setup
+
+After the main backend is running, SSH into the VPS and run:
+
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/lazyseahorse/all-zeroes/main/deploy/tg-bot.sh)
+```
+
+The wizard prompts for your bot token (from [@BotFather](https://t.me/BotFather)), your chat ID (from [@userinfobot](https://t.me/userinfobot)), and your Nextcloud credentials, then builds and installs the bot as a systemd service.
+
+### Bot env vars
+
+| Variable | Description |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Token from @BotFather |
+| `TELEGRAM_ALLOWED_CHAT_IDS` | Comma-separated chat IDs that may use the bot |
+| `BACKEND_URL` | Backend base URL (default `http://localhost:8080`) |
+| `BACKEND_API_KEY` | API key from `users.json` |
+| `NEXTCLOUD_URL` | WebDAV share URL |
+| `NEXTCLOUD_TOKEN` | Nextcloud share token |
+
+### Bot commands
+
+| Command | Description |
+|---|---|
+| `/list` | Show all jobs with status |
+| `/cancel <id-prefix>` | Cancel and delete a job |
+| `/deliver <id-prefix>` | Start delivery for a staged job (when deliver-now is off) |
+
 ## Project structure
 
 ```
 backend/
-  cmd/server/        entry point
+  cmd/server/        main backend entry point
+  cmd/tgbot/         Telegram bot (separate Go module)
   internal/
     api/             HTTP handlers, router, middleware
     db/              SQLite schema + queries
-    jobs/            job runner goroutines  (Phase 2+)
-    nextcloud/       thin WebDAV client     (Phase 2+)
-    gdrive/          rclone wrapper         (Phase 5+)
-pwa/                 vanilla JS PWA         (Phase 3+)
-deploy/              Caddyfile, systemd, CI
+    jobs/            job runner goroutines
+    nextcloud/       thin WebDAV client
+    gdrive/          rclone wrapper
+pwa/                 vanilla JS PWA
+deploy/              Caddyfile, systemd units, setup scripts
 ```
 
 ## Build phases

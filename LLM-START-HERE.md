@@ -9,12 +9,18 @@ Orientation doc for any AI agent picking up work on this repo. Read this first; 
 ## Top-level layout
 
 ```
-backend/        Go binary (the VPS service)
-pwa/            Static PWA hosted on GitHub Pages
-deploy/         Caddyfile, systemd unit, setup script
+backend/            Go binaries
+  cmd/server/       Main VPS service
+  cmd/tgbot/        Telegram bot (separate Go module — its own go.mod)
+pwa/                Static PWA hosted on GitHub Pages
+deploy/             Caddyfile, systemd units, setup scripts
+  setup.sh          Main backend 1-click installer
+  tg-bot.sh         Telegram bot installer
+  tg-bot-reset.sh   Telegram bot uninstaller
+  tgbot.service     Reference systemd unit for the bot
 .github/workflows/  deploy.yml (manual VPS deploy), pwa.yml (Pages)
-SPEC.md         Original design doc (pre-implementation)
-README.md       User-facing setup / env vars
+SPEC.md             Original design doc (pre-implementation)
+README.md           User-facing setup / env vars
 ```
 
 ## Backend — file by file
@@ -127,6 +133,29 @@ Service worker for installability only. Caches the static shell (`/`, `index.htm
 ### [pwa/manifest.json](pwa/manifest.json), [pwa/icon.svg](pwa/icon.svg)
 PWA metadata + a single SVG icon (no PNG fallbacks).
 
+## Telegram bot — [backend/cmd/tgbot/](backend/cmd/tgbot/)
+
+Separate Go module (`allzeroes/tgbot`) so the telegram library doesn't pollute the main server's `go.mod`. Single file: `main.go`.
+
+**Env vars required:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS` (comma-separated int64 chat IDs), `BACKEND_URL`, `BACKEND_API_KEY`, `NEXTCLOUD_URL`, `NEXTCLOUD_TOKEN`. Written to `/etc/zerorated/tgbot.env` (chmod 600) by the setup script.
+
+**State:** two in-memory maps protected by a single `sync.Mutex`:
+- `pending map[int64]*pendingSub` — one entry per chat while the user is picking options before submitting.
+- `tracked map[string]*trackedJob` — one entry per job ID, stores `lastStatus` and `lastChunkIdx` so the polling loop can diff against the previous poll and only send notifications on transitions.
+
+**Flow:**
+1. User sends URL or file → bot calls `getFile` (for documents) to get the Telegram CDN download URL, then presents an inline options keyboard (stage: VPS/Stream/GDrive, no-chunk toggle, deliver-now toggle).
+2. User taps options (each tap edits the message in-place) then taps 🚀 Submit → `POST /api/jobs`.
+3. Polling loop (every 4 s) calls `GET /api/jobs` and diffs against tracked state. On new delivering chunk: sends a message with the chunk URL and ✅ Done / ❌ Cancel buttons. On done/failed: sends terminal notification. On staged with deliver-now=off: sends message with 🚀 Deliver / ❌ Cancel buttons.
+4. User taps Done → `POST /api/jobs/{id}/chunks/done`. Cancel button → `DELETE /api/jobs/{id}`. Deliver button → `POST /api/jobs/{id}/deliver`. All three remove the inline keyboard from their message.
+5. Commands: `/list`, `/cancel <prefix>`, `/deliver <prefix>`.
+
+**Non-obvious details:**
+- Bot restart mid-delivery: on first poll, if a job is already `delivering` with a current chunk and no tracked entry exists, the bot re-sends the chunk message so the user always has the link. Without this, a restart would silently lose the chunk URL.
+- Callback data for chunk Done: `done:<jobID>:<idx>` (43 bytes max, well under Telegram's 64-byte limit). Cancel: `cancel:<jobID>` (43 bytes). Deliver: `deliver:<jobID>` (43 bytes).
+- Notifications are collected inside the mutex lock, then sent outside it — avoids holding the mutex during Telegram API calls.
+- `go.sum` is intentionally not committed (no Go locally). `tg-bot.sh` runs `go mod tidy` on the VPS before building.
+
 ## Deploy
 
 ### [deploy/setup.sh](deploy/setup.sh)
@@ -136,7 +165,13 @@ Interactive 1-click installer for fresh Ubuntu droplets. Uses `<public-ip>.nip.i
 Reference templates — the live ones are written by `setup.sh`.
 
 ### [deploy/reset.sh](deploy/reset.sh)
-Tear-down helper.
+Tear-down helper for the main backend.
+
+### [deploy/tg-bot.sh](deploy/tg-bot.sh)
+Interactive installer for the Telegram bot. Prompts for bot token, chat ID, NC credentials; auto-reads the API key from `/etc/zerorated/users.json`; runs `go mod tidy && go build` in `backend/cmd/tgbot/`; writes `/etc/zerorated/tgbot.env`; installs and starts `zerorated-tgbot.service`.
+
+### [deploy/tg-bot-reset.sh](deploy/tg-bot-reset.sh)
+Tear-down helper for the bot — stops/disables the service, removes binary and env file.
 
 ### [.github/workflows/deploy.yml](.github/workflows/deploy.yml)
 **Manual** (`workflow_dispatch`) — builds Linux amd64, scps the binary, sshs `systemctl restart zerorated`. Not on push to main, by choice.
@@ -170,5 +205,6 @@ GitHub Pages publish for `/pwa`.
 - **Add a new job state**: constant in [db/jobs.go](backend/internal/db/jobs.go), handle the transition in [jobs/runner.go](backend/internal/jobs/runner.go), update `GetNonTerminalJobs` if it should be resurrected, update PWA `renderJobCard` switch in [pwa/app.js](pwa/app.js).
 - **Add a new endpoint**: register in [api/router.go](backend/internal/api/router.go), add handler to [api/jobs.go](backend/internal/api/jobs.go), and if it touches the manager, extend the `jobManager` interface.
 - **Change chunk size**: env `CHUNK_SIZE_BYTES`. Existing in-flight jobs already have chunks rows in DB and won't be re-chunked.
+- **Build/run the Telegram bot**: `cd backend/cmd/tgbot && go mod tidy && go run .` with all six env vars set. It is a separate module — `go` commands must be run from `backend/cmd/tgbot/`, not from `backend/`.
 - **Run locally**: `cd backend && go run ./cmd/server` with `USERS_FILE=users.example.json` (after editing in a real key) and `ALLOWED_ORIGINS=http://localhost:*`. Serve `/pwa` over any static server on `localhost:5173`.
 - **Deploy**: trigger the `Deploy backend` workflow manually in GitHub Actions; PWA deploys on push automatically.

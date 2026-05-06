@@ -1,0 +1,14 @@
+[Unit]
+Description=Zero-rated Telegram bot
+After=network.target zerorated.service
+
+[Service]
+Type=simple
+User=zerorated
+EnvironmentFile=/etc/zerorated/tgbot.env
+ExecStart=/opt/zerorated/tgbot
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
