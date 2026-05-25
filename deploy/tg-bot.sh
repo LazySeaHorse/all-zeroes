@@ -45,14 +45,25 @@ esac
 
 export PATH=$PATH:/usr/local/go/bin
 
-cd /tmp
-rm -rf all-zeroes-tgbot
-git clone https://github.com/$GH_USER/all-zeroes.git all-zeroes-tgbot
-cd all-zeroes-tgbot/backend/cmd/tgbot
-/usr/local/go/bin/go mod tidy
-GOOS=linux GOARCH=${GO_ARCH} CGO_ENABLED=0 /usr/local/go/bin/go build -o tgbot .
-sudo mv tgbot /opt/zerorated/tgbot
-sudo chmod +x /opt/zerorated/tgbot
+if [ -f "./backend/cmd/tgbot/main.go" ]; then
+  echo "Detected local workspace. Building bot from current directory..."
+  cd backend/cmd/tgbot
+  /usr/local/go/bin/go mod tidy
+  GOOS=linux GOARCH=${GO_ARCH} CGO_ENABLED=0 /usr/local/go/bin/go build -o tgbot .
+  sudo mv tgbot /opt/zerorated/tgbot
+  sudo chmod +x /opt/zerorated/tgbot
+  cd ../../..
+else
+  echo "Cloning repository from GitHub..."
+  cd /tmp
+  rm -rf all-zeroes-tgbot
+  git clone https://github.com/$GH_USER/all-zeroes.git all-zeroes-tgbot
+  cd all-zeroes-tgbot/backend/cmd/tgbot
+  /usr/local/go/bin/go mod tidy
+  GOOS=linux GOARCH=${GO_ARCH} CGO_ENABLED=0 /usr/local/go/bin/go build -o tgbot .
+  sudo mv tgbot /opt/zerorated/tgbot
+  sudo chmod +x /opt/zerorated/tgbot
+fi
 
 echo "[2/3] Writing env file..."
 cat <<EOF | sudo tee /etc/zerorated/tgbot.env > /dev/null

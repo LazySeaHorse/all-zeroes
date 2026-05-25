@@ -84,14 +84,25 @@ else
   export PATH=$PATH:/usr/local/go/bin
 fi
 
-cd /tmp
-rm -rf all-zeroes
-git clone https://github.com/$GH_USER/all-zeroes.git
-cd all-zeroes/backend
-/usr/local/go/bin/go mod tidy
-GOOS=linux GOARCH=${GO_ARCH} CGO_ENABLED=0 /usr/local/go/bin/go build -o zerorated ./cmd/server
-sudo mv zerorated /opt/zerorated/server
-sudo chmod +x /opt/zerorated/server
+if [ -f "./backend/cmd/server/main.go" ]; then
+  echo "Detected local workspace. Building from current directory..."
+  cd backend
+  /usr/local/go/bin/go mod tidy
+  GOOS=linux GOARCH=${GO_ARCH} CGO_ENABLED=0 /usr/local/go/bin/go build -o zerorated ./cmd/server
+  sudo mv zerorated /opt/zerorated/server
+  sudo chmod +x /opt/zerorated/server
+  cd ..
+else
+  echo "Cloning repository from GitHub..."
+  cd /tmp
+  rm -rf all-zeroes
+  git clone https://github.com/$GH_USER/all-zeroes.git
+  cd all-zeroes/backend
+  /usr/local/go/bin/go mod tidy
+  GOOS=linux GOARCH=${GO_ARCH} CGO_ENABLED=0 /usr/local/go/bin/go build -o zerorated ./cmd/server
+  sudo mv zerorated /opt/zerorated/server
+  sudo chmod +x /opt/zerorated/server
+fi
 
 echo "[6/6] Setting up systemd service..."
 cat <<EOF | sudo tee /etc/systemd/system/zerorated.service > /dev/null
