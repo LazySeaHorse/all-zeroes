@@ -13,9 +13,11 @@ echo ""
 
 if [[ $REPLY =~ ^[Yy]$ ]]
 then
-    echo "[1/3] Stopping the service..."
+    echo "[1/3] Stopping the services..."
     sudo systemctl stop zerorated || true
     sudo systemctl disable zerorated || true
+    sudo systemctl stop caddy || true
+    sudo systemctl disable caddy || true
 
     echo "[2/3] Removing database, scratch directory, binary, and configs..."
     sudo rm -rf /var/lib/zerorated
@@ -25,7 +27,8 @@ then
     # Also remove the systemd unit file
     sudo rm -f /etc/systemd/system/zerorated.service
 
-    echo "[3/3] Reloading systemd..."
+    echo "[3/3] Removing system user and reloading systemd..."
+    sudo userdel zerorated || true
     sudo systemctl daemon-reload
 
     echo "========================================="
