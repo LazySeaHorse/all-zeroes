@@ -29,6 +29,20 @@ echo "Backend API key auto-detected from users.json."
 
 echo ""
 echo "[1/3] Building the bot binary..."
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64)
+    GO_ARCH="amd64"
+    ;;
+  aarch64|arm64)
+    GO_ARCH="arm64"
+    ;;
+  *)
+    echo "Unsupported architecture: $ARCH"
+    exit 1
+    ;;
+esac
+
 export PATH=$PATH:/usr/local/go/bin
 
 cd /tmp
@@ -36,7 +50,7 @@ rm -rf all-zeroes-tgbot
 git clone https://github.com/$GH_USER/all-zeroes.git all-zeroes-tgbot
 cd all-zeroes-tgbot/backend/cmd/tgbot
 /usr/local/go/bin/go mod tidy
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 /usr/local/go/bin/go build -o tgbot .
+GOOS=linux GOARCH=${GO_ARCH} CGO_ENABLED=0 /usr/local/go/bin/go build -o tgbot .
 sudo mv tgbot /opt/zerorated/tgbot
 sudo chmod +x /opt/zerorated/tgbot
 

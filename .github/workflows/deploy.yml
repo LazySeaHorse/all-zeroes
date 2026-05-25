@@ -2,7 +2,15 @@ name: Deploy backend
 
 on:
   workflow_dispatch:
-
+    inputs:
+      arch:
+        description: 'Target architecture (amd64 or arm64)'
+        required: true
+        default: 'amd64'
+        type: choice
+        options:
+          - amd64
+          - arm64
 
 jobs:
   deploy:
@@ -16,7 +24,7 @@ jobs:
 
       - name: Build
         working-directory: backend
-        run: GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o zerorated ./cmd/server
+        run: GOOS=linux GOARCH=${{ github.event.inputs.arch }} CGO_ENABLED=0 go build -o zerorated ./cmd/server
 
       - name: Copy binary
         uses: appleboy/scp-action@v0.1.7

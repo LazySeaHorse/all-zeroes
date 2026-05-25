@@ -61,12 +61,26 @@ EOF
 sudo systemctl restart caddy
 
 echo "[5/6] Installing Go & Building Backend..."
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64)
+    GO_ARCH="amd64"
+    ;;
+  aarch64|arm64)
+    GO_ARCH="arm64"
+    ;;
+  *)
+    echo "Unsupported architecture: $ARCH"
+    exit 1
+    ;;
+esac
+
 if [ -x "/usr/local/go/bin/go" ]; then
   echo "Go is already installed, skipping download."
   export PATH=$PATH:/usr/local/go/bin
 else
   GO_VERSION="1.22.2"
-  curl -sL https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+  curl -sL https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz | sudo tar -C /usr/local -xz
   export PATH=$PATH:/usr/local/go/bin
 fi
 
@@ -75,7 +89,7 @@ rm -rf all-zeroes
 git clone https://github.com/$GH_USER/all-zeroes.git
 cd all-zeroes/backend
 /usr/local/go/bin/go mod tidy
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 /usr/local/go/bin/go build -o zerorated ./cmd/server
+GOOS=linux GOARCH=${GO_ARCH} CGO_ENABLED=0 /usr/local/go/bin/go build -o zerorated ./cmd/server
 sudo mv zerorated /opt/zerorated/server
 sudo chmod +x /opt/zerorated/server
 
