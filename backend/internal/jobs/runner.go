@@ -579,7 +579,7 @@ func (r *runner) ncURL(path string) string {
 }
 
 func (r *runner) ncChunkURL(idx int) string {
-	return ChunkURL(r.job.NextcloudURL, r.job.ID, idx)
+	return ChunkURL(r.job.NextcloudURL, r.job.Filename, r.job.NoChunk, idx)
 }
 
 // NextcloudObjectURL returns the URL for an object owned by jobID under the
@@ -590,9 +590,20 @@ func NextcloudObjectURL(ncBase, jobID, name string) string {
 	return base + "/" + jobID + "_" + name
 }
 
-// ChunkURL returns the Nextcloud URL of a specific chunk part.
-func ChunkURL(ncBase, jobID string, idx int) string {
-	return NextcloudObjectURL(ncBase, jobID, fmt.Sprintf("part_%04d.bin", idx))
+// ChunkName returns the object name used for a delivered chunk. When no_chunk
+// is set, the source filename is preserved exactly.
+func ChunkName(filename string, noChunk bool, idx int) string {
+	name := sanitizeFilename(filename)
+	if noChunk {
+		return name
+	}
+	return fmt.Sprintf("%s.part%02d", name, idx+1)
+}
+
+// ChunkURL returns the Nextcloud URL of a specific delivered chunk.
+func ChunkURL(ncBase, filename string, noChunk bool, idx int) string {
+	base := strings.TrimRight(ncBase, "/")
+	return base + "/" + url.PathEscape(ChunkName(filename, noChunk, idx))
 }
 
 func numChunks(fileSize, chunkSize int64) int {

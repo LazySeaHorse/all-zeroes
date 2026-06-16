@@ -442,7 +442,7 @@ function renderJobCard(job) {
 
 function renderChunkAction(job) {
   const chunk = job.current_chunk;
-  const name = chunkName(chunk.idx);
+  const name = chunk.name;
 
   // Chunk is still uploading to Nextcloud — not available for download yet.
   if (chunk.status === 'uploading') {
@@ -459,8 +459,7 @@ function renderChunkAction(job) {
     try {
       const publicPhp = ncURL.indexOf('/public.php');
       const base = publicPhp >= 0 ? ncURL.slice(0, publicPhp) : new URL(ncURL).origin;
-      const filename = chunk.url.split('/').pop();
-      const href = `${base}/s/${ncToken}/download?files=${encodeURIComponent(filename)}`;
+      const href = `${base}/s/${ncToken}/download?files=${encodeURIComponent(chunk.name)}`;
       downloadBtn = `<a class="btn btn-primary btn-sm" href="${esc(href)}" target="_blank" rel="noopener">⬇ Download from Nextcloud</a>`;
     } catch { /* ignore */ }
   }
@@ -468,7 +467,7 @@ function renderChunkAction(job) {
   // Secondary line shown when the next chunk is already being pre-uploaded.
   let nextUploadingLine = '';
   if (job.uploading_chunk) {
-    const nextName = chunkName(job.uploading_chunk.idx);
+    const nextName = job.uploading_chunk.name;
     nextUploadingLine = `<span class="chunk-label" style="opacity:0.65">Uploading ${esc(nextName)} in background…</span>`;
   }
 
@@ -484,6 +483,13 @@ function renderChunkAction(job) {
 }
 
 function renderDone(job) {
+  if (job.no_chunk) {
+    return `
+      <div class="chunk-action">
+        <span class="chunk-label">Downloaded as <strong>${esc(job.filename)}</strong>.</span>
+      </div>`;
+  }
+
   return `
     <div class="concat-box">
       <p>All chunks downloaded. Reassemble with:</p>
@@ -497,9 +503,18 @@ function renderDone(job) {
 function buildConcatCmd(job) {
   const isWin = navigator.userAgent.includes('Windows');
   if (isWin) {
-    return `cd %USERPROFILE%\\Downloads\\${job.id}\r\ncopy /b part_*.bin "${job.filename}"`;
+    return `cd %USERPROFILE%\\Downloads\\${job.id}\r\ncopy /b ${cmdQuote(`${job.filename}.part*`)} ${cmdQuote(job.filename)}`;
   }
-  return `cd ~/Downloads/${job.id}\ncat part_*.bin > "${job.filename}" && rm part_*.bin`;
+  const partPrefix = shQuote(`${job.filename}.part`);
+  return `cd ~/Downloads/${job.id}\ncat ${partPrefix}* > ${shQuote(job.filename)} && rm ${partPrefix}*`;
+}
+
+function shQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+function cmdQuote(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
 }
 
 function progressBarHTML(pct) {
@@ -643,9 +658,6 @@ function copyCmd(jobId) {
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
-function chunkName(idx) {
-  return `part_${String(idx).padStart(4, '0')}.bin`;
-}
 
 function fmtSize(bytes) {
   if (bytes == null) return '—';

@@ -63,6 +63,7 @@ type jobResponse struct {
 
 type chunkInfo struct {
 	Idx    int    `json:"idx"`
+	Name   string `json:"name"`
 	URL    string `json:"url"`
 	Size   int64  `json:"size"`
 	Status string `json:"status"` // "uploading" or "uploaded"
@@ -429,20 +430,10 @@ func jobToResponse(j *db.Job, chunks []db.Chunk) jobResponse {
 			continue
 		}
 		if chunks[i].Status == db.ChunkUploaded && current == nil {
-			current = &chunkInfo{
-				Idx:    chunks[i].Idx,
-				URL:    jobs.ChunkURL(j.NextcloudURL, j.ID, chunks[i].Idx),
-				Size:   chunks[i].Size,
-				Status: "uploaded",
-			}
+			current = chunkToInfo(j, &chunks[i], "uploaded")
 		}
 		if chunks[i].Status == db.ChunkUploading && uploading == nil {
-			uploading = &chunkInfo{
-				Idx:    chunks[i].Idx,
-				URL:    jobs.ChunkURL(j.NextcloudURL, j.ID, chunks[i].Idx),
-				Size:   chunks[i].Size,
-				Status: "uploading",
-			}
+			uploading = chunkToInfo(j, &chunks[i], "uploading")
 		}
 	}
 
@@ -484,5 +475,15 @@ func jobToResponse(j *db.Job, chunks []db.Chunk) jobResponse {
 		UploadingChunk: uploading,
 		CreatedAt:      time.Unix(j.CreatedAt, 0).UTC(),
 		UpdatedAt:      time.Unix(j.UpdatedAt, 0).UTC(),
+	}
+}
+
+func chunkToInfo(j *db.Job, c *db.Chunk, status string) *chunkInfo {
+	return &chunkInfo{
+		Idx:    c.Idx,
+		Name:   jobs.ChunkName(j.Filename, j.NoChunk, c.Idx),
+		URL:    jobs.ChunkURL(j.NextcloudURL, j.Filename, j.NoChunk, c.Idx),
+		Size:   c.Size,
+		Status: status,
 	}
 }
